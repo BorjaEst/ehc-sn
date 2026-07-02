@@ -58,7 +58,9 @@ def compute_location_responses(
     n_locations: int,
 ) -> tuple[NDArray, NDArray]:
     """Aggregate rectified cell responses into per-location means."""
-    return aggregate_rate_map(rectify_response(cells_trace), location_ids, n_locations)
+    return aggregate_rate_map(
+        rectify_response(cells_trace), location_ids, n_locations
+    )
 
 
 def compute_cell_location_responses(
@@ -69,14 +71,22 @@ def compute_cell_location_responses(
 ) -> tuple[NDArray, NDArray]:
     """Return per-location mean responses and counts for one cell."""
     n_locations = _environment_n_locations(world)
-    location_response_matrix, location_counts = compute_location_responses(cells_trace, location_ids, n_locations)
-    if location_response_matrix.size == 0 or cell_idx < 0 or cell_idx >= location_response_matrix.shape[0]:
+    location_response_matrix, location_counts = compute_location_responses(
+        cells_trace, location_ids, n_locations
+    )
+    if (
+        location_response_matrix.size == 0
+        or cell_idx < 0
+        or cell_idx >= location_response_matrix.shape[0]
+    ):
         empty = np.zeros((0,), dtype=float)
         return empty, np.zeros((0,), dtype=int)
     return location_response_matrix[cell_idx], location_counts
 
 
-def _empty_prepared_rate_map(*, smooth_sigma: float, min_bin_occupancy: float) -> PreparedRateMap:
+def _empty_prepared_rate_map(
+    *, smooth_sigma: float, min_bin_occupancy: float
+) -> PreparedRateMap:
     empty_grid = np.zeros((0, 0), dtype=float)
     empty_values = np.zeros((0,), dtype=float)
     return PreparedRateMap(
@@ -105,9 +115,13 @@ def prepare_rate_map(
     min_bin_occupancy: float = DEFAULT_RATE_MAP_MIN_BIN_OCCUPANCY,
 ) -> PreparedRateMap:
     """Build a prepared rate map for a selected cell."""
-    location_responses, location_counts = compute_cell_location_responses(world, cells_trace, location_ids, cell_idx)
+    location_responses, location_counts = compute_cell_location_responses(
+        world, cells_trace, location_ids, cell_idx
+    )
     if location_responses.size == 0:
-        return _empty_prepared_rate_map(smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy)
+        return _empty_prepared_rate_map(
+            smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy
+        )
     return prepare_rate_map_from_location_responses(
         world,
         location_responses,
@@ -134,14 +148,20 @@ def prepare_rate_maps(
         return ()
 
     n_locations = _environment_n_locations(world)
-    location_response_matrix, location_counts = compute_location_responses(cells_trace, location_ids, n_locations)
+    location_response_matrix, location_counts = compute_location_responses(
+        cells_trace, location_ids, n_locations
+    )
     if location_response_matrix.size == 0:
         return ()
 
     if cell_indices is None:
         indices = list(range(int(location_response_matrix.shape[0])))
     else:
-        indices = [int(idx) for idx in cell_indices if 0 <= int(idx) < int(location_response_matrix.shape[0])]
+        indices = [
+            int(idx)
+            for idx in cell_indices
+            if 0 <= int(idx) < int(location_response_matrix.shape[0])
+        ]
 
     return tuple(
         prepare_rate_map_from_location_responses(
@@ -169,14 +189,19 @@ def prepare_rate_map_from_location_responses(
     location_responses = np.asarray(location_responses, dtype=float)
     location_counts = np.asarray(location_counts, dtype=float)
     if location_responses.size == 0 or location_counts.size == 0:
-        return _empty_prepared_rate_map(smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy)
+        return _empty_prepared_rate_map(
+            smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy
+        )
 
     occupied_locations = np.isfinite(location_counts) & (location_counts > 0)
-    valid_response_locations = np.isfinite(location_responses) & occupied_locations
+    valid_response_locations = (
+        np.isfinite(location_responses) & occupied_locations
+    )
 
     response_mass_by_location = np.zeros_like(location_responses, dtype=float)
     response_mass_by_location[valid_response_locations] = (
-        location_responses[valid_response_locations] * location_counts[valid_response_locations]
+        location_responses[valid_response_locations]
+        * location_counts[valid_response_locations]
     )
 
     response_mass_grid, _, extent = rasterize_locations_additive(
@@ -192,7 +217,9 @@ def prepare_rate_map_from_location_responses(
         include_mask=occupied_locations,
     )
     if response_mass_grid.size == 0 or occupancy_grid.size == 0:
-        return _empty_prepared_rate_map(smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy)
+        return _empty_prepared_rate_map(
+            smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy
+        )
 
     response_mass_grid = np.asarray(response_mass_grid, dtype=float)
     occupancy_grid = np.asarray(occupancy_grid, dtype=float)
@@ -213,7 +240,11 @@ def prepare_rate_map_from_location_responses(
         )
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        rate_map = np.where(smoothed_occupancy_grid > 0, smoothed_response_mass_grid / smoothed_occupancy_grid, np.nan)
+        rate_map = np.where(
+            smoothed_occupancy_grid > 0,
+            smoothed_response_mass_grid / smoothed_occupancy_grid,
+            np.nan,
+        )
     valid_mask = occupancy_grid >= float(min_bin_occupancy)
     rate_map = np.where(valid_mask, rate_map, np.nan)
 

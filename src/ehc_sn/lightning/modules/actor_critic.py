@@ -26,19 +26,21 @@ from ehc_sn.controllers.deliberation.q_halting import (
 )
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.episode_sources import ShuffledEpisodeSource
-from ehc_sn.eval.contracts import (
+from ehc_sn.evaluation.contracts import (
     EvaluationCaseBatch,
     EvaluationCaseResult,
+    EvaluationConsumer,
     EvaluationTraceRequest,
 )
-from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.evaluation.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.metrics.adapter import update_metrics_from_step
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
-from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
+from ehc_sn.metrics.rollout import make_observed_step_metric_observer
 from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
+from ehc_sn.rollouts.materialization import ObservedStep
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
 from ehc_sn.traces import build_trace_spec
@@ -62,8 +64,8 @@ class RuntimeConfigLike(Protocol):
     """Protocol for deliberation/execution policy configs consumed by
     :class:`ActorCriticModule`.
 
-    Both :class:`~ehc_sn.tasks.mazehard.runtime.MazeHardRuntimeConfig` and
-    :class:`~ehc_sn.tasks.seqmaze.runtime.SeqMazeRuntimeConfig` satisfy this
+    Both :class:`~ehp_sn.tasks.mazehard.runtime.MazeHardRuntimeConfig` and
+    :class:`~ehp_sn.tasks.seqmaze.runtime.SeqMazeRuntimeConfig` satisfy this
     protocol.  The module does not import task-specific types.
     """
 
@@ -592,14 +594,14 @@ class ActorCriticModule(L.LightningModule):
                 )
             self._payload_validated = True
 
-        halt_disabled = self.global_step < self.config.halt_disabled_steps
+        is_warmup = self.global_step < self.config.halt_disabled_steps
         execution = run_captured_rollout(
             runner=self._train_runner,
             source=self._train_source,
             controller=self.controller,
             carry=self._train_carry,
             runner_options={
-                "allow_halt": not halt_disabled,
+                "allow_halt": not is_warmup,
                 "explore": True,
                 "halt_action": self._deliberation.halt_action,
                 "max_halt_steps": self._deliberation.episode_horizon,
@@ -732,11 +734,9 @@ class ActorCriticModule(L.LightningModule):
                 case_id=f"val-{batch_idx:04d}",
             ),
             trace_request=trace_request,
-        )
-        update_metric_collection_from_evaluated_chunk(
-            collection=self.val_metrics,
-            evaluated=evaluation.evaluated,
-            routes=self._bindings.episode_routes,
+            metric_observer=make_observed_step_metric_observer(
+                self.val_metrics, self._bindings.episode_routes
+            ),
         )
 
         inp = self.adapter.prepare_inputs(batch)
@@ -777,7 +777,9 @@ class ActorCriticModule(L.LightningModule):
         self,
         case: EvaluationCaseBatch,
         *,
+        consumers: Sequence[EvaluationConsumer] = (),
         trace_request: EvaluationTraceRequest | None = None,
+        metric_observer: Callable[[ObservedStep], None] | None = None,
     ) -> EvaluationCaseResult:
         self._assert_setup()
 
@@ -809,7 +811,10 @@ class ActorCriticModule(L.LightningModule):
                 "halt_action": self._deliberation.halt_action,
                 "max_halt_steps": self._deliberation.episode_horizon,
             },
+            consumers=consumers,
             trace_request=trace_request,
+            metric_observer=metric_observer,
+            case_meta_fn=self._bindings.build_trace_meta_fn,
         )
 
     def aggregate_evaluation_case_metrics(  # ---------------------------------

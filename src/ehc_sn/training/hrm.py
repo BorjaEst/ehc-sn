@@ -113,7 +113,7 @@ def load_weights_from_checkpoint(  # ------------------------------------------
             f"Valid groups: {sorted(_GROUP_TO_PREFIXES)!r}."
         )
 
-    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     raw_sd: dict = raw.get("state_dict", raw) if isinstance(raw, dict) else raw
     stripped: dict = {
         (k[len("model.") :] if k.startswith("model.") else k): v

@@ -105,7 +105,9 @@ def rasterize_locations(
         values, mask indicates valid pixels, and extent is
         (xmin, xmax, ymin, ymax).
     """
-    sum_grid, count_grid, extent = rasterize_locations_additive(world, values, grid_res=grid_res)
+    sum_grid, count_grid, extent = rasterize_locations_additive(
+        world, values, grid_res=grid_res
+    )
     ny, nx = sum_grid.shape
     grid = np.full((ny, nx), np.nan, dtype=float)
     valid = count_grid > 0
@@ -113,15 +115,21 @@ def rasterize_locations(
     return grid, valid, extent
 
 
-def _world_coords_and_plot_mask(world: AnyWorld) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+def _world_coords_and_plot_mask(
+    world: AnyWorld,
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
     """Return world coordinates and the mask that defines visible plot support."""
     locations = _environment_locations(world)
     if not locations:
         return np.zeros((0, 2), dtype=float), np.zeros((0,), dtype=bool)
 
-    coords = np.asarray([[loc["o"], loc["y"]] for loc in locations], dtype=float)
+    coords = np.asarray(
+        [[loc["o"], loc["y"]] for loc in locations], dtype=float
+    )
     finite = np.isfinite(coords).all(axis=1)
-    visible = np.asarray([bool(loc.get("valid", True)) for loc in locations], dtype=bool)
+    visible = np.asarray(
+        [bool(loc.get("valid", True)) for loc in locations], dtype=bool
+    )
     plot_mask = finite & visible
     if not np.any(plot_mask):
         plot_mask = finite

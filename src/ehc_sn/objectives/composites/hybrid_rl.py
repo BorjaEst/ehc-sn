@@ -174,12 +174,12 @@ class HybridRLObjective(nn.Module):
 
     The sole entry point is :meth:`compute_step`, which accepts a fully
     materialized :class:`HybridValueBatch` assembled by the learner
-    (e.g. :class:`~ehc_sn.training.q_halting.TD0ActorCriticBatchBuilder`) and
+    (e.g. :class:`~ehp_sn.training.q_halting.TD0ActorCriticBatchBuilder`) and
     returns loss, metrics, and signals.  It is a pure function over its input.
 
     This class is **not** a rollout-scoring objective.  It does not implement
     ``evaluate_step`` or ``forward`` over rollout chunks.  Validation scoring
-    is done by :class:`~ehc_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`.
+    is done by :class:`~ehp_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`.
 
     Used by the ``maze_hard`` HRM v2 training path.
     """

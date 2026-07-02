@@ -1,7 +1,30 @@
 # Logging Architecture
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > Canonical design for `ehp_sn.logging` — a small infrastructure package
 > for **operational events produced while the program executes**.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Logger acquisition (`get_logger`); logging configuration (`configure_logging`); execution context binding (`logging_context`, `bind_context`); rank filtering |
+| **Must not own**      | Domain results; ML artifacts; experiment tracking; metric infrastructure; tensor summarization                                                                |
+| **Public API**        | `LogFormat`, `LogLevel`, `LoggingConfig`, `get_logger`, `configure_logging`, `logging_context`, `bind_context`, `clear_context`                               |
+| **Allowed imports**   | stdlib, `structlog`                                                                                                                                           |
+| **Forbidden imports** | `torch`, `lightning`, `mlflow`, `zarr`, `matplotlib`, any `ehp_sn.*` domain package                                                                           |
+| **Layer**             | L0 — Foundation                                                                                                                                               |
+| **API verified**      | 🔴 Known gap: package `__init__.py` is empty; design not yet implemented                                                                                      |
+
+---
 
 `ehp_sn.logging` configures, enriches, filters, formats, and routes
 application log records. It does **not** own domain results, durable ML

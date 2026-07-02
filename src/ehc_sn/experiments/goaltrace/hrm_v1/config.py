@@ -25,11 +25,9 @@ from pydantic import BaseModel, Field
 from ehc_sn.adapters.hrm import GoaltraceHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.act_supervised import (
@@ -130,34 +128,18 @@ class GoaltraceHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
     )
 
 
-class GoaltraceHRMV1EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for Goaltrace × HRM-v1."""
+class GoaltraceHRMV1EvaluationOptions(EvaluationOptions):
+    """Pair-specific evaluation options for Goaltrace × HRM-v1.
 
-    model: GoaltraceHRMV1ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: Optional[HRMRuntimeConfig] = Field(
-        default=None,
-        description="Execution policy for eval-time rollout bounds.",
-    )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
-    )
+    Currently empty — all evaluation options inherited from recipe defaults.
+    """
+
+    pass
 
 
 __all__ = [
     "GoaltraceHRMV1ComponentConfigs",
-    "GoaltraceHRMV1EvaluationExperimentConfig",
+    "GoaltraceHRMV1EvaluationOptions",
     "GoaltraceHRMV1ModelConfig",
     "GoaltraceHRMV1TrainingExperimentConfig",
 ]

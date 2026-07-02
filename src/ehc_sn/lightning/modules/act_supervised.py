@@ -31,16 +31,20 @@ from ehc_sn.controllers.deliberation.act import (
     ACTControllerStepOutput,
 )
 from ehc_sn.data.episode_sources import ShuffledEpisodeSource
-from ehc_sn.eval.contracts import (
+from ehc_sn.evaluation.contracts import (
     EvaluationCaseBatch,
     EvaluationCaseResult,
+    EvaluationConsumer,
     EvaluationTraceRequest,
 )
-from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.evaluation.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
-from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
+from ehc_sn.metrics.rollout import (
+    make_observed_step_metric_observer,
+    update_metric_collection_from_evaluated_chunk,
+)
 from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.metrics.token import compute_accuracy_stats
 from ehc_sn.objectives.composites.act import (
@@ -52,6 +56,7 @@ from ehc_sn.objectives.contracts import (
     ACTSupervisedScoringInput,
     TaskStepEvaluation,
 )
+from ehc_sn.rollouts.materialization import ObservedStep
 from ehc_sn.rollouts.runtime import (
     CarrySnapshot,
     RecurrentRunner,
@@ -708,7 +713,6 @@ class ACTSupervisedModule(L.LightningModule):
                 "explore": True,
             },
             scoring_input_builder=self._build_scoring_input,
-            snapshot_model_state=True,
         )
         update_metric_collection_from_evaluated_chunk(
             self.train_metrics,
@@ -869,11 +873,9 @@ class ACTSupervisedModule(L.LightningModule):
                 case_id=f"val-{batch_idx:04d}",
             ),
             trace_request=trace_request,
-        )
-        update_metric_collection_from_evaluated_chunk(
-            self.val_metrics,
-            result.evaluated,
-            self._bindings.episode_routes,
+            metric_observer=make_observed_step_metric_observer(
+                self.val_metrics, self._bindings.episode_routes
+            ),
         )
 
         inp = self.adapter.prepare_inputs(batch)
@@ -910,7 +912,9 @@ class ACTSupervisedModule(L.LightningModule):
         self,
         case: EvaluationCaseBatch,
         *,
+        consumers: Sequence[EvaluationConsumer] = (),
         trace_request: EvaluationTraceRequest | None = None,
+        metric_observer: Callable[[ObservedStep], None] | None = None,
     ) -> EvaluationCaseResult:
         if trace_request is not None:
             trace_request = EvaluationTraceRequest(
@@ -944,7 +948,10 @@ class ACTSupervisedModule(L.LightningModule):
             ),
             runner_options={"allow_halt": False, "explore": False},
             scoring_input_builder=self._build_scoring_input,
+            consumers=consumers,
             trace_request=trace_request,
+            metric_observer=metric_observer,
+            case_meta_fn=self._bindings.build_trace_meta_fn,
         )
 
     def aggregate_evaluation_case_metrics(  # ---------------------------------

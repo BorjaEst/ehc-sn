@@ -132,7 +132,7 @@ def generate_openfield_source_specs(
         version=version,
         n_samples=n_samples,
         source_id="openfield",
-        builder="ehc_sn.data.source.openfield.generate_openfield_source_specs",
+        builder="ehp_sn.data.source.openfield.generate_openfield_source_specs",
         seed=topology_seed,
         stage_params=stage_params,
         preset=preset,

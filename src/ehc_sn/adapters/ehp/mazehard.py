@@ -10,7 +10,7 @@ Optimizer ownership in phase 2 (mazehard_reason_pretrain):
 
 Critic surface:
     EHCControlV1.reward_prediction is the STR V(s) scalar.  STR is the
-    canonical V(s) owner in this repo (see ehc_sn.modules.str.__init__).
+    canonical V(s) owner in this repo (see ehp_sn.modules.str.__init__).
     The bridge re-exposes it as critic.state_value with shape (B, 1) to
     satisfy the neutral QHaltingCriticOutput protocol.
 """
@@ -50,7 +50,7 @@ class MazeHardEHCV1CriticOutput:
     re-exposes EHCControlV1.reward_prediction as the canonical actor-critic
     critic surface.  STR is the V(s) owner in this codebase; the field name
     ``reward_prediction`` on EHCControlV1 reflects naming drift, not a
-    semantic difference from V(s).  See ehc_sn.modules.str.__init__ for the
+    semantic difference from V(s).  See ehp_sn.modules.str.__init__ for the
     authoritative STR contract.
     """
 

@@ -2,7 +2,6 @@
 
 from .config import (
     GoaltraceHRMV1ComponentConfigs,
-    GoaltraceHRMV1EvaluationExperimentConfig,
     GoaltraceHRMV1ModelConfig,
     GoaltraceHRMV1TrainingExperimentConfig,
 )
@@ -12,7 +11,6 @@ from .training import build_goaltrace_hrm_v1_training_experiment
 
 __all__ = [
     "GoaltraceHRMV1ComponentConfigs",
-    "GoaltraceHRMV1EvaluationExperimentConfig",
     "GoaltraceHRMV1ModelConfig",
     "GoaltraceHRMV1TrainingExperimentConfig",
     "build_goaltrace_hrm_v1_evaluation_experiment",

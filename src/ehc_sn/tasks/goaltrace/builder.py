@@ -1207,7 +1207,7 @@ def build_goaltrace_task_corpus(
             extent=[n_observations],
             n_samples=split_counts,
             source_id="synthetic/dagflow",
-            builder="ehc_sn.tasks.goaltrace.builder.build_goaltrace_task_corpus",
+            builder="ehp_sn.tasks.goaltrace.builder.build_goaltrace_task_corpus",
             seed=seed,
             stage_params=stage_params,
             task=TASK_FAMILY,

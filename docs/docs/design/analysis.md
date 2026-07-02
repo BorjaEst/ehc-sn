@@ -1,5 +1,12 @@
 # Analysis Design Contract
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > A deterministic post-evaluation transformation layer that consumes
 > evaluation artifacts and produces reproducible, typed, domain-level
 > analytical results.
@@ -28,14 +35,22 @@ figures / reports       visual rendering + narrative composition
 ```
 
 The analysis layer is **one-way downstream** of evaluation. It never
-imports from `figures`, `training`, `controllers`, or `objectives`.
+imports from `figures`, `training`, `controllers`, `objectives`, or `lightning`.
 
-Allowed imports:
+| Rule                  | Value                                                                                                                                                                       |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Layer**             | L6 — Post-Processing & Presentation                                                                                                                                         |
+| **Allowed imports**   | `evaluation` (contracts, `EvaluationResult`, artifact refs), `traces` (`TraceReader` protocol), `diagnostics` (`DiagnosticFinding`), `contracts`, `types`, `numpy`, `scipy` |
+| **Forbidden imports** | `figures`, `training`, `controllers`, `objectives`, `lightning`                                                                                                             |
+| **Key invariant**     | Analysis consumes immutable artifacts via reader protocols; it never executes evaluation or training                                                                        |
 
-- `contracts` — shared artifact keys, dependency vocabulary;
-- `contracts.artifacts` — shared artifact schemas (`ArtifactKey`, `ProducedArtifact`);
-- `contracts.diagnostics` — shared diagnostic types;
-- `types` — shared domain types;
+Allowed imports in detail:
+
+- `ehp_sn.contracts` — shared artifact keys, dependency vocabulary, `Provenance`;
+- `ehp_sn.evaluation` (contracts only) — `EvaluationResult`, `ArtifactRef`, `ProducedArtifact`;
+- `ehp_sn.traces` — `TraceReader` protocol (NOT `TraceTree` directly);
+- `ehp_sn.diagnostics` — `DiagnosticFinding`, `DiagnosticSeverity`;
+- `ehp_sn.types` — shared domain types;
 - `numpy`, `scipy`, `xarray` — numerical kernels;
 - optional `torch`/`cupy` behind explicit optional adapters (analysis must not
   load model checkpoints or depend on training loops).
@@ -378,7 +393,7 @@ backends, tracker systems, or accumulator implementations.
 ## 6. Shared artifact contracts
 
 Once analysis and figures consume artifact types, they must not live under
-`eval`. They belong in a shared location:
+`evaluation`. They belong in a shared location:
 
 ```
 ehp_sn/contracts/artifacts.py
@@ -394,11 +409,11 @@ ehp_sn/contracts/provenance.py
 
 ```
 analysis ─┐
-eval ─────┼──► contracts.artifacts
+evaluation ─────┼──► contracts.artifacts
 figures ──┘
 ```
 
-This move is part of migration phase 1. The `eval` package may re-export for
+This move is part of migration phase 1. The `evaluation` package may re-export for
 backward compatibility during the transition.
 
 ---
@@ -791,10 +806,10 @@ Allowed:
 
 Forbidden:
     analysis → figures.*
-    analysis → eval.accumulators
-    analysis → eval.inspection
-    analysis → eval.cli
-    analysis → eval.execution
+    analysis → evaluation.accumulators
+    analysis → evaluation.inspection
+    analysis → evaluation.cli
+    analysis → evaluation.execution
     analysis → zarr                         (restricted to executor)
     analysis → training.*
     analysis → controllers.*
@@ -816,10 +831,10 @@ FORBIDDEN_ANALYSIS_DEPENDENCIES = {
     "ehp_sn.training",
     "ehp_sn.controllers",
     "ehp_sn.objectives",
-    "ehp_sn.eval.cli",
-    "ehp_sn.eval.execution",
-    "ehp_sn.eval.accumulators",
-    "ehp_sn.eval.inspection",
+    "ehp_sn.evaluation.cli",
+    "ehp_sn.evaluation.execution",
+    "ehp_sn.evaluation.accumulators",
+    "ehp_sn.evaluation.inspection",
     "zarr",
 }
 ```
@@ -869,11 +884,11 @@ class GridnessSpec(BaseModel, frozen=True):
    deprecation warning.
 2. Extract shared artifact types (`ArtifactKey`, `ArtifactKind`,
    `ArtifactRequirement`, `ProducedArtifact`, `ArtifactRef`) into
-   `contracts.artifacts`. Re-export from `eval.contracts` for backward
+   `contracts.artifacts`. Re-export from `evaluation.contracts` for backward
    compatibility.
 3. Extract shared diagnostic types into `contracts.diagnostics`.
-4. Remove `analysis → eval.inspection` import.
-5. Remove `analysis → eval.accumulators` import (use lazy factory
+4. Remove `analysis → evaluation.inspection` import.
+5. Remove `analysis → evaluation.accumulators` import (use lazy factory
    registration in `builtins.py`).
 6. Add architecture test that rejects forbidden imports.
 
@@ -919,13 +934,13 @@ genuinely identical behavior.
 
 - Model construction, checkpoint loading, device placement.
 - Task rollout, environment interaction, action selection.
-- Primary benchmark metric computation (those belong to `eval`/`metrics`).
+- Primary benchmark metric computation (those belong to `evaluation`/`metrics`).
 - Visual rendering, plot styling, color palettes.
 - Notebook or report orchestration.
 - MLflow run creation or experiment management.
 - Filesystem path resolution or Zarr store management.
 
-These concerns belong to `eval`, `figures`, `reporting`, or infrastructure
+These concerns belong to `evaluation`, `figures`, `reporting`, or infrastructure
 adapters. Analysis sits between them: consuming evaluation artifacts,
 producing domain results, and letting figures/reports consume those results.
 

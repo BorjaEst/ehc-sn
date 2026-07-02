@@ -8,7 +8,6 @@ Stable surface:
 - :class:`RoutebindHRMV1ComponentConfigs` — component-level config.
 - :class:`RoutebindHRMV1ModelConfig` — model-level config.
 - :class:`RoutebindHRMV1TrainingExperimentConfig` — full training config.
-- :class:`RoutebindHRMV1EvaluationExperimentConfig` — evaluation-only config.
 - :func:`build_routebind_hrm_v1_training_experiment` — training experiment builder.
 - :func:`build_routebind_hrm_v1_model` — model constructor.
 - :func:`build_routebind_hrm_v1_evaluation_experiment` — evaluation experiment builder.
@@ -16,7 +15,6 @@ Stable surface:
 
 from .config import (
     RoutebindHRMV1ComponentConfigs,
-    RoutebindHRMV1EvaluationExperimentConfig,
     RoutebindHRMV1ModelConfig,
     RoutebindHRMV1TrainingExperimentConfig,
 )
@@ -26,7 +24,6 @@ from .training import build_routebind_hrm_v1_training_experiment
 
 __all__ = [
     "RoutebindHRMV1ComponentConfigs",
-    "RoutebindHRMV1EvaluationExperimentConfig",
     "RoutebindHRMV1ModelConfig",
     "RoutebindHRMV1TrainingExperimentConfig",
     "build_routebind_hrm_v1_evaluation_experiment",

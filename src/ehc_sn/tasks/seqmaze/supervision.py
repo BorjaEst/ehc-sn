@@ -5,7 +5,7 @@ learning-ready supervision structs.  It is task-owned and reusable
 across model families (HRM v1, HRM v2, EHP).
 
 Loss-label construction (PAD → ignore index) moved here from
-:mod:`ehc_sn.adapters.hrm.objectives`.
+:mod:`ehp_sn.adapters.hrm.objectives`.
 """
 
 from __future__ import annotations

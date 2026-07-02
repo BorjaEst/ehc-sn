@@ -1,7 +1,7 @@
 """MazeHard prediction-reasoning selector.
 
 Produces ``MazehardPredictionReasoningData`` from a semantic
-:class:`~ehc_sn.figures.selectors.mazehard.MazehardEvaluationSample`.
+:class:`~ehp_sn.figures.selectors.mazehard.MazehardEvaluationSample`.
 
 The adapter from ``TraceTree`` to ``MazehardEvaluationSample`` is called at
 the entry point — this module never touches raw trace keys or tree access.

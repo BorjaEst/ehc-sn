@@ -14,7 +14,7 @@ from typing import Mapping
 import torch
 from torch import Tensor
 
-from ehc_sn.metrics.spec import MetricSpec
+from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.rollouts.materialization import EvaluatedChunk
 
@@ -120,6 +120,14 @@ ARENA_METRIC_SPECS: list[MetricSpec] = [
         "when attributing to the ancestral pathway. TEM/EHP family.",
     ),
 ]
+
+_ARENA_METRICS_MAP = {spec.name: spec for spec in ARENA_METRIC_SPECS}
+
+ARENA_SCORING_SPEC: TaskScoringSpec = TaskScoringSpec(
+    task_name="arena",
+    metrics=_ARENA_METRICS_MAP,
+    default_score="accuracy_revisit",
+)
 
 
 # =============================================================================
@@ -274,8 +282,8 @@ def build_arena_score_report(
 class ArenaCaseMetrics:
     """Per-case scalar aggregates for one Arena-Struct evaluation case.
 
-    Accumulated from per-step :class:`~ehc_sn.metrics.step_metrics.RatioStat`
-    extras across all steps in an :class:`~ehc_sn.objectives.rollout.EvaluatedChunk`.
+    Accumulated from per-step :class:`~ehp_sn.metrics.step_metrics.RatioStat`
+    extras across all steps in an :class:`~ehp_sn.objectives.rollout.EvaluatedChunk`.
     """
 
     case_id: str
@@ -295,7 +303,7 @@ def _accumulate_ratio_stat(
     steps: tuple,
 ) -> tuple[Tensor, Tensor]:
     """Walk a tuple of observed steps and sum numerator/denominator for one
-    :class:`~ehc_sn.metrics.step_metrics.RatioStat` key from
+    :class:`~ehp_sn.metrics.step_metrics.RatioStat` key from
     ``step.outputs.metrics.extras``."""
     num_sum = torch.zeros(())
     den_sum = torch.zeros(())
@@ -415,6 +423,8 @@ def coerce_revisit_mask(
 
 # =============================================================================
 __all__ = [
+    "ARENA_METRIC_SPECS",
+    "ARENA_SCORING_SPEC",
     "ArenaCaseMetrics",
     "ArenaEpisodeSemantics",
     "ArenaScoreReport",

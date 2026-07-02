@@ -1,7 +1,7 @@
 """Shared online environment rollout helpers for environment-stepping controllers.
 
 Contains the :class:`EnvRolloutEnvironment` protocol, :func:`initial_env_reset`,
-and :func:`reset_halted_slots` — used by :mod:`ehc_sn.controllers.online.actor_critic`.
+and :func:`reset_halted_slots` — used by :mod:`ehp_sn.controllers.online.actor_critic`.
 """
 
 from __future__ import annotations
@@ -119,16 +119,23 @@ def reset_halted_slots(
             parts.append(f"unexpected new keys: {added}")
         if removed:
             parts.append(f"missing previously present keys: {removed}")
-        raise KeyError(f"Env partial-reset schema drift detected — {'; '.join(parts)}.")
+        raise KeyError(
+            f"Env partial-reset schema drift detected — {'; '.join(parts)}."
+        )
 
     if not torch.any(halted):
         return old_static, env_td, visit_counts
 
     # Merge: halted slots get new_reset_td values; active slots keep old_static.
     next_static = {
-        key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, old_static[key]) for key, value in new_reset_td.items()
+        key: torch.where(
+            halted.view((-1,) + (1,) * (value.ndim - 1)), value, old_static[key]
+        )
+        for key, value in new_reset_td.items()
     }
-    merged_td = TensorDict(next_static, batch_size=env_td.batch_size, device=env_td.device)
+    merged_td = TensorDict(
+        next_static, batch_size=env_td.batch_size, device=env_td.device
+    )
     next_env_td = environment.reset_slots(halted, merged_td, env_td)
 
     # Zero visit counters for halted slots.

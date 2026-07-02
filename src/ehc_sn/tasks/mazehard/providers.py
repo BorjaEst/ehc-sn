@@ -1,6 +1,6 @@
 """Task-owned evaluation case providers for the MazeHard task family.
 
-These providers implement :class:`~ehc_sn.eval.contracts.EvaluationSourceProvider`
+These providers implement :class:`~ehp_sn.evaluation.contracts.EvaluationSourceProvider`
 and supply batched MazeHard replay cases to named evaluation regimes.
 
 Ownership rules:
@@ -11,7 +11,7 @@ Ownership rules:
 
 Batch format:
     Each provider yields batches already transformed through
-    :func:`~ehc_sn.tasks.mazehard.runtime.coerce_maze_hard_batch`, so
+    :func:`~ehp_sn.tasks.mazehard.runtime.coerce_maze_hard_batch`, so
     ``hrm_v1.py`` and ``hrm_v2.py`` can consume them unchanged through
     :meth:`execute_evaluation_batch` without any adapter change.
 """
@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
-from ehc_sn.eval.contracts import EvaluationCaseBatch
+from ehc_sn.evaluation.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.tasks.mazehard.traces import MazeHardEvaluationSourceContext
 
@@ -37,7 +37,7 @@ class MazeHardReplayProvider:
 
     Loads from a versioned processed MazeHard task corpus and yields batched
     cases for named evaluation regimes.  Each case batch is already transformed
-    through :func:`~ehc_sn.tasks.mazehard.runtime.coerce_maze_hard_batch`
+    through :func:`~ehp_sn.tasks.mazehard.runtime.coerce_maze_hard_batch`
     (i.e. ``{"input_ids": Tensor, "labels": Tensor}``) so any HRM Lightning
     family can consume it unchanged through :meth:`execute_evaluation_batch`.
 
@@ -82,7 +82,7 @@ class MazeHardReplayProvider:
                 across batches).  ``max_batches`` takes precedence.
 
         Yields:
-            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehp_sn.evaluation.contracts.EvaluationCaseBatch` items with
             ``{"input_ids": Tensor, "labels": Tensor}`` batches, a deterministic
             ``case_id``, and split metadata.
         """
@@ -159,7 +159,7 @@ class MazeHardFixedProbeProvider:
     """MazeHard-task-owned provider that evaluates a fixed, explicitly-named set of mazes.
 
     Use this for diagnostic regimes that must be reproducible across runs and checkpoints:
-    you supply the exact :attr:`~ehc_sn.data.index.DatasetIndexEntry.id` values to load,
+    you supply the exact :attr:`~ehp_sn.data.index.DatasetIndexEntry.id` values to load,
     and the provider yields them in stable order every time.
 
     This provider is diagnostic-only.  It does not make benchmark claims and does not
@@ -170,7 +170,7 @@ class MazeHardFixedProbeProvider:
     - ``dataset_path`` (*str*, required): Path to the processed MazeHard task corpus root.
     - ``split`` (*str*, default ``"val"``): Dataset split that contains the samples.
     - ``sample_ids`` (*list[str]*, required): Ordered list of
-      :attr:`~ehc_sn.data.index.DatasetIndexEntry.id` values to load.  Must be
+      :attr:`~ehp_sn.data.index.DatasetIndexEntry.id` values to load.  Must be
       non-empty, contain no duplicates, and all ids must exist in the index.
     - ``batch_size`` (*int*, default ``1``): Mazes per evaluation case batch.
       When ``batch_size == 1`` the single sample id is used as ``case_id`` directly.
@@ -219,7 +219,7 @@ class MazeHardFixedProbeProvider:
             max_batches: If > 0, stop after this many batches; otherwise yield all.
 
         Yields:
-            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehp_sn.evaluation.contracts.EvaluationCaseBatch` items with
             ``{"input_ids": Tensor, "labels": Tensor}`` batches, a deterministic
             ``case_id``, and probe metadata.
 

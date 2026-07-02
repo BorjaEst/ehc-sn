@@ -1,13 +1,13 @@
 """SeqMaze task-owned reward semantics.
 
 :class:`SeqMazeRewardProjector` computes the stop-time reward from
-task evaluation semantics (:class:`~ehc_sn.tasks.seqmaze.evaluation.SeqMazeStepScore`).
+task evaluation semantics (:class:`~ehp_sn.tasks.seqmaze.evaluation.SeqMazeStepScore`).
 
 Reward formula: terminal success reward for correct HALT, explicit continue cost,
 incorrect-halt penalty, and truncation penalty.
 
 The projector is stateless and injected into
-:class:`~ehc_sn.tasks.seqmaze.runtime.SeqMazeRuntime` at construction.
+:class:`~ehp_sn.tasks.seqmaze.runtime.SeqMazeRuntime` at construction.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class SeqMazeRewardConfig(BaseModel, extra="forbid"):
 class SeqMazeRewardProjector:
     """Orthogonal reward projection over SeqMaze task evaluation semantics.
 
-    Consumes :class:`~ehc_sn.tasks.seqmaze.evaluation.SeqMazeStepScore`
+    Consumes :class:`~ehp_sn.tasks.seqmaze.evaluation.SeqMazeStepScore`
     and applies the stop-time reward:
 
     - terminal success reward when halting with exact path correctness

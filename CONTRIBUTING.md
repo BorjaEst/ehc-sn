@@ -24,7 +24,7 @@ pip install -e ".[dev]"
 ### 3. Verify install
 
 ```bash
-python -c "import ehc_sn; print('ehc_sn import OK')"
+python -c "import ehp_sn; print('ehp_sn import OK')"
 pytest -q
 ```
 
@@ -32,7 +32,7 @@ pytest -q
 
 - Python style and formatting are defined by Black and isort settings in
   pyproject.toml.
-- Use the canonical namespace ehc_sn.
+- Use the canonical namespace ehp_sn.
 - Keep architecture boundaries aligned with spec/spec-architecture.md.
 - Keep runtime and dependency constraints aligned with
   spec/spec-requirements.md.

@@ -85,6 +85,12 @@ class CarrySnapshot:
     when step-truth tensors are required. Snapshot fields are limited to
     lightweight continuity facts and current-step extracts and must exclude
     resident per-trajectory payloads.
+
+    ``model_state`` is always ``None`` — semantic model observations are
+    extracted via ``model.trace_views()`` and passed through ``StepContext``
+    instead of cloning the full recurrent carry into each snapshot.  Trace
+    field getters read ``ctx.record.snapshot.*`` for carry-side data and
+    ``ctx.record.outputs.*`` for controller outputs.
     """
 
     halted: Tensor
@@ -319,10 +325,14 @@ def _snapshot_value(  # -------------------------------------------------------
 # =============================================================================
 def _snapshot_carry(  # -------------------------------------------------------
     carry: HaltedCarry,
-    *,
-    snapshot_model_state: bool,
 ) -> CarrySnapshot:
-    """Return the closed post-step carry snapshot stored in rollout records."""
+    """Return the closed post-step carry snapshot stored in rollout records.
+
+    ``model_state`` is always ``None`` — semantic model observations are
+    extracted via ``model.trace_views()`` and passed through ``StepContext``
+    instead of cloning the full recurrent carry.  Trace field getters read
+    ``ctx.record.snapshot.*`` and ``ctx.record.outputs.*``.
+    """
     return CarrySnapshot(
         halted=_snapshot_value(carry.halted, path="carry.halted"),
         steps=_snapshot_value(
@@ -332,14 +342,7 @@ def _snapshot_carry(  # -------------------------------------------------------
         static_data=_snapshot_value(
             getattr(carry, "static_data", None), path="carry.static_data"
         ),
-        model_state=(
-            _snapshot_value(
-                getattr(carry, "model_state", None),
-                path="carry.model_state",
-            )
-            if snapshot_model_state
-            else None
-        ),
+        model_state=getattr(carry, "model_state", None),
         env_td=_snapshot_value(
             getattr(carry, "env_td", None), path="carry.env_td"
         ),
@@ -384,7 +387,6 @@ class SingleStepRunner:
         options: Optional[Mapping[str, object]] = None,
         record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
-        snapshot_model_state: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a one-step rollout chunk."""
         _validate_single_step_limit("max_rollout_steps", max_rollout_steps)
@@ -400,10 +402,7 @@ class SingleStepRunner:
             ) from exc
 
         carry, outputs = controller.step(carry, batch, **options_dict)
-        snapshot = _snapshot_carry(
-            carry,
-            snapshot_model_state=snapshot_model_state,
-        )
+        snapshot = _snapshot_carry(carry)
         source.update(carry=carry)
         # executed_frame: the actual step tensors consumed by the model — taken from
         # carry.data which the controller sets from resident_payload for replay controllers.
@@ -455,7 +454,6 @@ class RecurrentRunner:
         options: Optional[Mapping[str, object]] = None,
         record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
-        snapshot_model_state: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a rollout chunk terminated by halt, source exhaustion, or step limit."""
         _validate_limit("max_rollout_steps", max_rollout_steps)
@@ -487,10 +485,7 @@ class RecurrentRunner:
                 break
 
             carry, outputs = controller.step(carry, batch, **options_dict)
-            snapshot = _snapshot_carry(
-                carry,
-                snapshot_model_state=snapshot_model_state,
-            )
+            snapshot = _snapshot_carry(carry)
             source.update(carry=carry)
             # executed_frame: carry-owned step tensors, independent of source batch.
             executed = dict(getattr(carry, "data", None) or {})

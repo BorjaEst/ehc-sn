@@ -5,7 +5,7 @@ masked cross-entropy loss over token logits.  It consumes a
 :class:`TokenObjectiveInput` and returns an :class:`ObjectiveResult` with
 per-element and per-sample terms.
 
-Internally delegates to :func:`~ehc_sn.objectives._token.compute_token_loss_unreduced`.
+Internally delegates to :func:`~ehp_sn.objectives._token.compute_token_loss_unreduced`.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ class TokenPredictionObjective(nn.Module):
 
     Args:
         loss_fn: Name of the cross-entropy primitive from
-            :mod:`ehc_sn.loss.cross_entropy`.
+            :mod:`ehp_sn.loss.cross_entropy`.
         ignore_label_id: Label index to ignore in loss computation.
             Defaults to :data:`IGNORE_LABEL_ID` (``-100``).
     """

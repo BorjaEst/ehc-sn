@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from ehc_sn.figures.registry import REGISTRY, FigureSpec
+from ehc_sn.figures.registry import (
+    REGISTRY,
+    ArtifactInputs,
+    FigureSpec,
+    TaskDataInputs,
+    TraceInputs,
+)
 
 
 def register_builtin_figures() -> None:
     """Register built-in figure specifications (lazy template imports)."""
     # Templates are imported inside this function so that importing
-    # ``ehc_sn.figures`` does not eagerly pull in all template modules.
+    # ``ehp_sn.figures`` does not eagerly pull in all template modules.
+    from ehc_sn.figures.registry import FigureSurface
     from ehc_sn.figures.templates.diagnostics import (
         h_l_residuals_over_steps,
         hpc_place_metrics,
@@ -87,16 +94,22 @@ def register_builtin_figures() -> None:
                 source_kind="task_sample",
                 task="mazehard",
                 plot=task_overview_mazehard.plot,
+                version=1,
                 default_filename="task_overview_mazehard",
                 maturity="stable",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
-                tags={"mazehard", "task-context"},
-                trace_keys=set(),
-                meta_keys={
-                    MAZEHARD_META_KEY_INPUT_IDS,
-                    MAZEHARD_META_KEY_GT_OVERLAY,
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
                 },
+                tags={"mazehard", "task-context"},
+                inputs=TaskDataInputs(
+                    meta_keys=frozenset(
+                        {
+                            MAZEHARD_META_KEY_INPUT_IDS,
+                            MAZEHARD_META_KEY_GT_OVERLAY,
+                        }
+                    )
+                ),
             )
         )
 
@@ -114,19 +127,28 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task="mazehard",
                 plot=prediction_reasoning_mazehard.plot,
+                version=1,
                 default_filename="prediction_reasoning_mazehard",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="evaluation_artifact",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
+                },
                 tags={"mazehard", "reasoning", "prediction"},
-                trace_keys={
-                    MAZEHARD_TRACE_KEY_HALTED,
-                    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
-                },
-                meta_keys={
-                    MAZEHARD_META_KEY_INPUT_IDS,
-                    MAZEHARD_META_KEY_GT_OVERLAY,
-                },
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            MAZEHARD_TRACE_KEY_HALTED,
+                            MAZEHARD_TRACE_KEY_PRED_OVERLAY,
+                        }
+                    ),
+                    meta_keys=frozenset(
+                        {
+                            MAZEHARD_META_KEY_INPUT_IDS,
+                            MAZEHARD_META_KEY_GT_OVERLAY,
+                        }
+                    ),
+                ),
             )
         )
 
@@ -144,25 +166,32 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task="goaltrace",
                 plot=prediction_reasoning_goaltrace.plot,
+                version=1,
                 default_filename="prediction_reasoning_goaltrace",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="evaluation_artifact",
-                tags={"goaltrace", "reasoning", "prediction"},
-                trace_keys={
-                    GOALTRACE_TRACE_KEY_FIRING_FIELD,
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
                 },
-                meta_keys=frozenset(
-                    {
-                        GOALTRACE_META_KEY_OBSERVATION_ID,
-                        GOALTRACE_META_KEY_WEIGHT,
-                        GOALTRACE_META_KEY_CURRENT_FLAG,
-                        GOALTRACE_META_KEY_GOAL_FLAG,
-                        GOALTRACE_META_KEY_NODE_MASK,
-                        GOALTRACE_META_KEY_TARGET_FIELD,
-                        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
-                        GOALTRACE_META_KEY_SUCCESSOR_MASK,
-                    }
+                tags={"goaltrace", "reasoning", "prediction"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            GOALTRACE_TRACE_KEY_FIRING_FIELD,
+                        }
+                    ),
+                    meta_keys=frozenset(
+                        {
+                            GOALTRACE_META_KEY_OBSERVATION_ID,
+                            GOALTRACE_META_KEY_WEIGHT,
+                            GOALTRACE_META_KEY_CURRENT_FLAG,
+                            GOALTRACE_META_KEY_GOAL_FLAG,
+                            GOALTRACE_META_KEY_NODE_MASK,
+                            GOALTRACE_META_KEY_TARGET_FIELD,
+                            GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+                            GOALTRACE_META_KEY_SUCCESSOR_MASK,
+                        }
+                    ),
                 ),
             )
         )
@@ -181,24 +210,31 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task="routebind",
                 plot=prediction_reasoning_routebind.plot,
+                version=1,
                 default_filename="prediction_reasoning_routebind",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="evaluation_artifact",
-                tags={"routebind", "reasoning", "prediction"},
-                trace_keys={
-                    "routebind/trajectory_field",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
                 },
-                meta_keys=frozenset(
-                    {
-                        ROUTEBIND_META_KEY_CELL_TYPE,
-                        ROUTEBIND_META_KEY_OBSERVATION_ID,
-                        ROUTEBIND_META_KEY_START_FLAG,
-                        ROUTEBIND_META_KEY_GOAL_FLAG,
-                        ROUTEBIND_META_KEY_CELL_MASK,
-                        ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
-                        ROUTEBIND_META_KEY_TARGET_WAYPOINT,
-                    }
+                tags={"routebind", "reasoning", "prediction"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            "routebind/trajectory_field",
+                        }
+                    ),
+                    meta_keys=frozenset(
+                        {
+                            ROUTEBIND_META_KEY_CELL_TYPE,
+                            ROUTEBIND_META_KEY_OBSERVATION_ID,
+                            ROUTEBIND_META_KEY_START_FLAG,
+                            ROUTEBIND_META_KEY_GOAL_FLAG,
+                            ROUTEBIND_META_KEY_CELL_MASK,
+                            ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+                            ROUTEBIND_META_KEY_TARGET_WAYPOINT,
+                        }
+                    ),
                 ),
             )
         )
@@ -217,13 +253,15 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=pfc_path_memory_probe.plot,
+                version=1,
                 default_filename="pfc_path_memory_probe",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
+                },
                 tags={"hrm", "probe", "working_memory"},
-                trace_keys=set(),
-                meta_keys=set(),
+                inputs=TraceInputs(trace_keys=frozenset({PFC_TRACE_KEY_Z_H})),
             )
         )
 
@@ -244,17 +282,24 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task="arena",
                 plot=prediction_overlay_arena.plot,
+                version=1,
                 default_filename="prediction_overlay_arena",
                 maturity="stable",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="evaluation_artifact",
-                tags={"arena"},
-                trace_keys={
-                    TEM_TRACE_KEY_PRED_POST,
-                    TEM_TRACE_KEY_PRED_RECALL,
-                    TEM_TRACE_KEY_PRED_PATH,
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
                 },
-                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
+                tags={"arena"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            TEM_TRACE_KEY_PRED_POST,
+                            TEM_TRACE_KEY_PRED_RECALL,
+                            TEM_TRACE_KEY_PRED_PATH,
+                        }
+                    ),
+                    meta_keys=frozenset({TEM_META_KEY_TARGET_OBS_ID}),
+                ),
             )
         )
 
@@ -272,18 +317,15 @@ def register_builtin_figures() -> None:
                 source_kind="task_sample",
                 task="arena",
                 plot=task_overview_arena.plot,
+                version=1,
                 default_filename="task_overview_arena",
                 maturity="stable",
-                allowed_surfaces={"report"},
-                input_contract="offline_artifact",
-                tags={"arena", "task-context"},
-                trace_keys={
-                    ARENA_TRACE_KEY_WALL_MASK,
-                    ARENA_TRACE_KEY_OBSERVATION_IDS,
-                    ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS,
-                    ARENA_TRACE_KEY_REVISIT_MASK,
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
                 },
-                meta_keys=set(),
+                tags={"arena", "task-context"},
+                inputs=TaskDataInputs(),
             )
         )
 
@@ -300,13 +342,17 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=pfc_latent_dynamics.plot,
+                version=1,
                 default_filename="pfc_latent_dynamics",
                 maturity="stable",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
+                },
                 tags={"hrm", "dynamics", "latent"},
-                trace_keys={PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L},
-                meta_keys=set(),
+                inputs=TraceInputs(
+                    trace_keys=frozenset({PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L})
+                ),
             )
         )
 
@@ -324,13 +370,17 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=h_l_residuals_over_steps.plot,
+                version=1,
                 default_filename="h_l_residuals_over_steps",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
+                },
                 tags={"hrm", "dynamics", "latent"},
-                trace_keys={PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L},
-                meta_keys=set(),
+                inputs=TraceInputs(
+                    trace_keys=frozenset({PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L})
+                ),
             )
         )
 
@@ -350,21 +400,36 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=lec_content_filtering.plot,
+                version=1,
                 default_filename="lec_content_filtering",
                 maturity="experimental",
-                allowed_surfaces={"report", "diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"lec", "ehp", "report"},
-                trace_keys={
-                    WORLD_TRACE_KEY_OBSERVATION,
-                    LEC_TRACE_KEY_CELLS,
-                    LEC_TRACE_KEY_FILTERED,
+                allowed_surfaces={
+                    FigureSurface.REPORT,
+                    FigureSurface.INSPECTION,
                 },
-                meta_keys={LEC_META_KEY_ALPHA, LEC_META_KEY_WF},
+                tags={"lec", "ehp", "report"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            WORLD_TRACE_KEY_OBSERVATION,
+                            LEC_TRACE_KEY_CELLS,
+                            LEC_TRACE_KEY_FILTERED,
+                            LEC_META_KEY_ALPHA,
+                            LEC_META_KEY_WF,
+                        }
+                    ),
+                    meta_keys=frozenset(),
+                ),
             )
         )
 
     if not REGISTRY.has("mec_grid_metrics"):
+        from ehc_sn.evaluation.contracts import (
+            ArtifactKey,
+            ArtifactKind,
+            ArtifactRequirement,
+        )
+
         REGISTRY.register(
             FigureSpec(
                 name="mec_grid_metrics",
@@ -378,13 +443,61 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=mec_grid_metrics.plot,
+                version=1,
                 default_filename="mec_grid_metrics",
                 maturity="experimental",
-                allowed_surfaces={"report"},
-                input_contract="evaluation_artifact",
+                allowed_surfaces={
+                    FigureSurface.REPORT,
+                    FigureSurface.INSPECTION,
+                },
                 tags={"mec", "ehp", "report"},
-                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
-                meta_keys={META_KEY_ENVIRONMENTS},
+                inputs=ArtifactInputs(
+                    artifacts=frozenset(
+                        {
+                            ArtifactRequirement(
+                                key=ArtifactKey(
+                                    ArtifactKind.ANALYSIS, "mec_grid"
+                                ),
+                                schema_version=1,
+                            ),
+                        }
+                    )
+                ),
+            )
+        )
+
+    if not REGISTRY.has("mec_grid_metrics_preview"):
+        REGISTRY.register(
+            FigureSpec(
+                name="mec_grid_metrics_preview",
+                description=(
+                    "MEC gridness and spacing preview from evaluation trace. "
+                    "Same metric computation as mec_grid_metrics, but consumes "
+                    "trace data directly (no analysis artifact required)."
+                ),
+                category="diagnostic",
+                role="mec_grid_metrics",
+                source_kind="evaluation_sample",
+                task=None,
+                plot=mec_grid_metrics.plot,
+                version=1,
+                default_filename="mec_grid_metrics_preview",
+                maturity="experimental",
+                allowed_surfaces={FigureSurface.INSPECTION},
+                tags={"mec", "ehp", "inspection"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            MEC_TRACE_KEY_CELLS,
+                            WORLD_TRACE_KEY_LOCATION_IDS,
+                        }
+                    ),
+                    meta_keys=frozenset(
+                        {
+                            META_KEY_ENVIRONMENTS,
+                        }
+                    ),
+                ),
             )
         )
 
@@ -402,17 +515,36 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=mec_autocorr_mosaic.plot,
+                version=1,
                 default_filename="mec_autocorr_mosaic",
                 maturity="experimental",
-                allowed_surfaces={"report", "diagnostic"},
-                input_contract="evaluation_artifact",
+                allowed_surfaces={
+                    FigureSurface.REPORT,
+                    FigureSurface.INSPECTION,
+                },
                 tags={"mec", "ehp", "report"},
-                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
-                meta_keys={META_KEY_ENVIRONMENTS},
+                inputs=ArtifactInputs(
+                    artifacts=frozenset(
+                        {
+                            ArtifactRequirement(
+                                key=ArtifactKey(
+                                    ArtifactKind.ANALYSIS, "mec_grid"
+                                ),
+                                schema_version=1,
+                            ),
+                        }
+                    )
+                ),
             )
         )
 
     if not REGISTRY.has("hpc_place_metrics"):
+        from ehc_sn.evaluation.contracts import (
+            ArtifactKey,
+            ArtifactKind,
+            ArtifactRequirement,
+        )
+
         REGISTRY.register(
             FigureSpec(
                 name="hpc_place_metrics",
@@ -426,13 +558,61 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=hpc_place_metrics.plot,
+                version=1,
                 default_filename="hpc_place_metrics",
                 maturity="experimental",
-                allowed_surfaces={"report"},
-                input_contract="evaluation_artifact",
+                allowed_surfaces={
+                    FigureSurface.REPORT,
+                    FigureSurface.INSPECTION,
+                },
                 tags={"hpc", "ehp", "report"},
-                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
-                meta_keys={META_KEY_ENVIRONMENTS},
+                inputs=ArtifactInputs(
+                    artifacts=frozenset(
+                        {
+                            ArtifactRequirement(
+                                key=ArtifactKey(
+                                    ArtifactKind.ANALYSIS, "hpc_place"
+                                ),
+                                schema_version=1,
+                            ),
+                        }
+                    )
+                ),
+            )
+        )
+
+    if not REGISTRY.has("hpc_place_metrics_preview"):
+        REGISTRY.register(
+            FigureSpec(
+                name="hpc_place_metrics_preview",
+                description=(
+                    "HPC place-cell metrics preview from evaluation trace. "
+                    "Same metric computation as hpc_place_metrics, but consumes "
+                    "trace data directly (no analysis artifact required)."
+                ),
+                category="diagnostic",
+                role="hpc_place_metrics",
+                source_kind="evaluation_sample",
+                task=None,
+                plot=hpc_place_metrics.plot,
+                version=1,
+                default_filename="hpc_place_metrics_preview",
+                maturity="experimental",
+                allowed_surfaces={FigureSurface.INSPECTION},
+                tags={"hpc", "ehp", "inspection"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            HPC_TRACE_KEY_CELLS,
+                            WORLD_TRACE_KEY_LOCATION_IDS,
+                        }
+                    ),
+                    meta_keys=frozenset(
+                        {
+                            META_KEY_ENVIRONMENTS,
+                        }
+                    ),
+                ),
             )
         )
 
@@ -450,13 +630,26 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=hpc_rate_map_mosaic.plot,
+                version=1,
                 default_filename="hpc_rate_map_mosaic",
                 maturity="experimental",
-                allowed_surfaces={"report", "diagnostic"},
-                input_contract="evaluation_artifact",
+                allowed_surfaces={
+                    FigureSurface.REPORT,
+                    FigureSurface.INSPECTION,
+                },
                 tags={"hpc", "ehp", "report"},
-                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
-                meta_keys={META_KEY_ENVIRONMENTS},
+                inputs=ArtifactInputs(
+                    artifacts=frozenset(
+                        {
+                            ArtifactRequirement(
+                                key=ArtifactKey(
+                                    ArtifactKind.ANALYSIS, "hpc_place"
+                                ),
+                                schema_version=1,
+                            ),
+                        }
+                    )
+                ),
             )
         )
 
@@ -475,19 +668,26 @@ def register_builtin_figures() -> None:
                 source_kind="evaluation_sample",
                 task=None,
                 plot=lec_content_structure_rsa.plot,
+                version=1,
                 default_filename="lec_content_structure_rsa",
                 maturity="experimental",
-                allowed_surfaces={"report", "diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"lec", "ehp", "report"},
-                trace_keys={
-                    LEC_TRACE_KEY_CELLS,
-                    MEC_TRACE_KEY_CELLS,
-                    HPC_TRACE_KEY_CELLS,
-                    WORLD_TRACE_KEY_OBSERVATION,
-                    WORLD_TRACE_KEY_LOCATION_IDS,
+                allowed_surfaces={
+                    FigureSurface.REPORT,
+                    FigureSurface.INSPECTION,
                 },
-                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
+                tags={"lec", "ehp", "report"},
+                inputs=TraceInputs(
+                    trace_keys=frozenset(
+                        {
+                            LEC_TRACE_KEY_CELLS,
+                            MEC_TRACE_KEY_CELLS,
+                            HPC_TRACE_KEY_CELLS,
+                            WORLD_TRACE_KEY_OBSERVATION,
+                            WORLD_TRACE_KEY_LOCATION_IDS,
+                        }
+                    ),
+                    meta_keys=frozenset({TEM_META_KEY_TARGET_OBS_ID}),
+                ),
             )
         )
 
@@ -505,21 +705,25 @@ def register_builtin_figures() -> None:
                 source_kind="task_sample",
                 task="routebind",
                 plot=task_overview_routebind.plot,
+                version=1,
                 default_filename="task_overview_routebind",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
+                },
                 tags={"routebind", "task-context"},
-                trace_keys=frozenset(),
-                meta_keys=frozenset(
-                    {
-                        ROUTEBIND_META_KEY_CELL_TYPE,
-                        ROUTEBIND_META_KEY_GOAL_FLAG,
-                        ROUTEBIND_META_KEY_OBSERVATION_ID,
-                        ROUTEBIND_META_KEY_START_FLAG,
-                        ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
-                        ROUTEBIND_META_KEY_TARGET_WAYPOINT,
-                    }
+                inputs=TaskDataInputs(
+                    meta_keys=frozenset(
+                        {
+                            ROUTEBIND_META_KEY_CELL_TYPE,
+                            ROUTEBIND_META_KEY_GOAL_FLAG,
+                            ROUTEBIND_META_KEY_OBSERVATION_ID,
+                            ROUTEBIND_META_KEY_START_FLAG,
+                            ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+                            ROUTEBIND_META_KEY_TARGET_WAYPOINT,
+                        }
+                    )
                 ),
             )
         )
@@ -538,23 +742,27 @@ def register_builtin_figures() -> None:
                 source_kind="task_sample",
                 task="goaltrace",
                 plot=task_overview_goaltrace.plot,
+                version=1,
                 default_filename="task_overview_goaltrace",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
+                allowed_surfaces={
+                    FigureSurface.INSPECTION,
+                    FigureSurface.REPORT,
+                },
                 tags={"goaltrace", "task-context"},
-                trace_keys=frozenset(),
-                meta_keys=frozenset(
-                    {
-                        GOALTRACE_META_KEY_OBSERVATION_ID,
-                        GOALTRACE_META_KEY_WEIGHT,
-                        GOALTRACE_META_KEY_CURRENT_FLAG,
-                        GOALTRACE_META_KEY_GOAL_FLAG,
-                        GOALTRACE_META_KEY_NODE_MASK,
-                        GOALTRACE_META_KEY_TARGET_FIELD,
-                        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
-                        GOALTRACE_META_KEY_SUCCESSOR_MASK,
-                    }
+                inputs=TaskDataInputs(
+                    meta_keys=frozenset(
+                        {
+                            GOALTRACE_META_KEY_OBSERVATION_ID,
+                            GOALTRACE_META_KEY_WEIGHT,
+                            GOALTRACE_META_KEY_CURRENT_FLAG,
+                            GOALTRACE_META_KEY_GOAL_FLAG,
+                            GOALTRACE_META_KEY_NODE_MASK,
+                            GOALTRACE_META_KEY_TARGET_FIELD,
+                            GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+                            GOALTRACE_META_KEY_SUCCESSOR_MASK,
+                        }
+                    )
                 ),
             )
         )
@@ -562,8 +770,8 @@ def register_builtin_figures() -> None:
     # --- Post-registration validation: every bounded_trace figure must  ---
     #     declare non-empty trace_keys so the callback can derive required
     #     keys from the registry.
-    for spec in REGISTRY.list_specs(input_contract="bounded_trace"):
-        if not spec.trace_keys:
+    for spec in REGISTRY.list_specs():
+        if isinstance(spec.inputs, TraceInputs) and not spec.inputs.trace_keys:
             raise ValueError(
                 f"bounded_trace figure {spec.name!r} declares empty trace_keys; "
                 "every bounded_trace figure must declare at least one trace_key "

@@ -21,7 +21,7 @@ but are not part of the task-level data contract.
 Canonical package path:
 
 ```text
-src/ehc_sn/tasks/goaltrace/
+src/ehp_sn/tasks/goaltrace/
 ```
 
 `goaltrace` is the **isolated HRM/PFC training task**. It trains HRM to transform

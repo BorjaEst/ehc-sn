@@ -7,7 +7,7 @@ This module owns:
 - :class:`GoaltraceTraceSupplements` — canonical supplement content ready to attach.
 - :func:`build_goaltrace_trace_supplements` — constructs supplements from source context.
 - :func:`apply_goaltrace_trace_supplements` — attaches supplement data to a
-  :class:`~ehc_sn.traces.trace_tree.TraceTree`.
+  :class:`~ehp_sn.traces.trace_tree.TraceTree`.
 
 Supplements are populated from the evaluation batch (not from disk).
 Topology tensors (successor_indices, successor_mask) are captured at
@@ -119,7 +119,7 @@ def apply_goaltrace_trace_supplements(
     in ``traces/keys.py``.
 
     Args:
-        trace: The :class:`~ehc_sn.traces.trace_tree.TraceTree` to modify in-place.
+        trace: The :class:`~ehp_sn.traces.trace_tree.TraceTree` to modify in-place.
         supplements: The supplement content to attach.
     """
     trace.attached_meta[GOALTRACE_META_KEY_OBSERVATION_ID] = (

@@ -1,7 +1,41 @@
 # Training Architecture
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > Canonical design for `ehp_sn.training` — the package that owns **training
 > execution policy** for EHP model systems.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Training-step composition; backward policy (accumulation, clipping, stepping); TBPTT boundary decisions; checkpoint emission policy; optimizer/scheduler construction; `TrainingState` counters |
+| **Must not own**      | Model architecture; loss mathematics; rollout execution; task semantics; metric formulas; Lightning lifecycle                                                                                   |
+| **Public API**        | `LossTerm`, `TrainStepOutput`, `TrainingUnit`, `TrainingState`, `TrainingConfig`, `GradientConfig`, `OptimizerSpec`                                                                             |
+| **Allowed imports**   | `rollouts` (contracts, StepRecord), `objectives` (ObjectiveResult), `models` (trainable state), `contracts`, `types`                                                                            |
+| **Forbidden imports** | `lightning` (training must remain backend-independent), `evaluation`, `figures`, `reporting`                                                                                                    |
+| **Layer**             | L3 — Runtime Execution                                                                                                                                                                          |
+| **API verified**      | 🔴 Known gap: documented `TrainingUnit` vs actual `score_rollout_streaming` API                                                                                                                 |
+
+### Transitional API note
+
+The current implementation uses function-based composition
+(`score_rollout_streaming`, `score_captured_rollout`, `score_rollout_streaming_with_trace`)
+rather than the `TrainingUnit` protocol. `TrainingUnit` is the target
+abstraction for framework-independent training runtimes. The current
+functions serve the same purpose — they bridge rollout records to
+objective computation — but couple more tightly to Lightning modules.
+Migration to `TrainingUnit` will decouple training execution from the
+Lightning adapter.
+
+---
 
 `ehp_sn.training` provides framework-independent contracts and services for
 executing optimization over EHP model systems. It owns training-step
@@ -48,18 +82,50 @@ or **why** a loss is scientifically valid.
 
 ### 1.2 Concrete ownership
 
-| Owns                                 | Examples                                                           |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| Training-step composition contract   | `LossTerm`, `TrainStepOutput`, `TrainingUnit`                      |
-| Aggregation of named loss terms      | Weighted sum, backward eligibility per term                        |
-| Mutable training state               | `TrainingState` — batch step, optimizer step, samples seen         |
-| Optimization policy                  | Gradient accumulation, clipping, nonfinite detection               |
-| Optimizer and scheduler construction | `OptimizerSpec`, `ParameterGroupSpec`, `build_optimizer`           |
-| Parameter ownership and validation   | Exactly-one-group invariant, frozen-param detection                |
-| Recurrent carry truncation policy    | Autograd detach at TBPTT boundaries                                |
-| Family-specific runtime schedules    | `tem.py` (TEM `resolve_tem_runtime`), `hrm.py` (validation config) |
-| Distributed loss normalization       | `SumOverBatch`, `normalize_loss_for_backward`                      |
-| Family-specific training computation | `training/units/` — `VariationalReplayTrainingUnit`, etc.          |
+| Owns                                 | Examples                                                             |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| Training-step composition contract   | `LossTerm`, `TrainStepOutput`, `TrainingUnit`                        |
+| Aggregation of named loss terms      | Weighted sum, backward eligibility per term                          |
+| Mutable training state               | `TrainingState` — batch step, optimizer step, samples seen           |
+| **Backward execution**               | Accumulation, backward call, gradient clipping, nonfinite detection  |
+| Optimizer and scheduler construction | `OptimizerSpec`, `ParameterGroupSpec`, `build_optimizer`             |
+| Parameter ownership and validation   | Exactly-one-group invariant, frozen-param detection                  |
+| **TBPTT boundary policy**            | When autograd detachment occurs (not how carry reset is implemented) |
+| Family-specific runtime schedules    | `tem.py` (TEM `resolve_tem_runtime`), `hrm.py` (validation config)   |
+| Distributed loss normalization       | `SumOverBatch`, `normalize_loss_for_backward`                        |
+| **Checkpoint emission policy**       | When and at what frequency (not storage integration)                 |
+| Family-specific training computation | `training/units/` — `VariationalReplayTrainingUnit`, etc.            |
+
+### 1.2a Carry / TBPTT division of ownership
+
+Training owns **when** a TBPTT truncation boundary occurs. Rollouts owns
+**how** a generic carry tree is transformed at that boundary. Models own
+model-specific boundary hooks such as `finalize_memory()`.
+
+```
+training owns:   when a TBPTT truncation boundary occurs (TBPTTConfig)
+rollouts owns:   how a generic carry tree is transformed at that boundary
+models own:      model-specific boundary hooks (e.g. finalize_memory())
+```
+
+### 1.2b Backward / optimizer division of ownership
+
+| Operation                                         | Owner                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| Construct scalar differentiable objective         | `objectives`                                               |
+| Decide accumulation, backward, clipping, stepping | `training`                                                 |
+| Translate that execution into Lightning hooks     | `lightning`                                                |
+| Execute PyTorch autograd primitive                | Called by `training`, directly or through a framework port |
+
+### 1.2c Checkpoint division of ownership
+
+| Checkpoint concern                            | Owner                                    |
+| --------------------------------------------- | ---------------------------------------- |
+| Serializable model and optimizer state        | `models` and `training`                  |
+| When a checkpoint should be emitted           | `training`                               |
+| Lightning callback/file integration           | `lightning`                              |
+| Checkpoint reference and provenance schemas   | shared artifact contracts (`contracts/`) |
+| Selecting/loading a checkpoint for evaluation | `evaluation` or `model_artifacts`        |
 
 ### 1.3 What training does NOT own
 
@@ -93,7 +159,7 @@ tasks ─────────X──► training
 metrics ───────X──► training
 training ──────X──► lightning
 training ──────X──► experiments
-training ──────X──► eval
+training ──────X──► evaluation
 training ──────X──► figures
 training ──────X──► traces
 ```

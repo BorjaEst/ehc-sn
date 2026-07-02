@@ -1,11 +1,57 @@
 # Adapter Design Contract
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
 > A narrow composition layer for exactly one supported task–model pairing.
 
 An adapter translates **task-native contracts** into **model-native contracts**
 and produces a **stable bridge output** consumed by objectives, controllers,
 traces, and evaluators. It is the sole coupling point between tasks and models;
 neither side knows about the other.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Task→model input encoding; model invocation; model→task output decoding; compatibility validation; model-state lifecycle delegation          |
+| **Must not own**      | Target extraction; loss calculation; metric computation; action selection; rollout iteration; checkpoint resolution; experiment registration |
+| **Public API**        | `BridgeAdapter` protocol, per-pairing `BridgeOutput` dataclasses, `build_*_bridge` builders                                                  |
+| **Allowed imports**   | `models`, `tasks` (contracts only), `modules`, `contracts`, `types`                                                                          |
+| **Forbidden imports** | `training`, `lightning`, `evaluation`, `objectives`, `controllers`, `rollouts`                                                               |
+| **Layer**             | L2 — Computation                                                                                                                             |
+| **Key invariant**     | Adapter is the sole coupling point between tasks and models; controllers delegate model invocation to the adapter                            |
+
+### Canonical invocation position
+
+The adapter is invoked by the **controller**, not directly by the rollout
+runner. The chain is:
+
+```
+rollout runner
+    → controller.step(carry, batch, context)
+        → adapter(model, task_input, state)
+            → model(input, state) → output, next_state
+        → adapter.postprocess(output) → bridge_output
+    → (carry, controller_output)
+```
+
+| Concern                                           | Owner         |
+| ------------------------------------------------- | ------------- |
+| Repeated temporal iteration                       | `rollouts`    |
+| Control decision and one-step transition          | `controllers` |
+| Task-to-model translation and physical model call | `adapters`    |
+| Neural computation                                | `models`      |
+
+The controller invokes the adapter but must not directly understand
+task/model pairing details. It receives a bridge output and makes control
+decisions from it.
 
 ---
 
@@ -659,7 +705,7 @@ GenericDecoder   — decoding what?
 ### Target structure
 
 ```
-src/ehc_sn/adapters/
+src/ehp_sn/adapters/
 ├── __init__.py                  # exports BridgeAdapter protocol only
 ├── contracts.py                 # BridgeAdapter protocol, type vars
 ├── tem/
@@ -741,7 +787,7 @@ __all__ = ["BridgeAdapter"]
 Users import concrete pairings from family barrels:
 
 ```python
-from ehc_sn.adapters.hrm import GoaltraceHRMV1BridgeAdapter
+from ehp_sn.adapters.hrm import GoaltraceHRMV1BridgeAdapter
 ```
 
 ---
@@ -749,7 +795,7 @@ from ehc_sn.adapters.hrm import GoaltraceHRMV1BridgeAdapter
 ## 17. Objective bindings
 
 Objective-specific extraction and target logic does **not** belong in adapters.
-It belongs in `ehc_sn.objectives.task/` alongside the task evaluators.
+It belongs in `ehp_sn.objectives.task/` alongside the task evaluators.
 
 Correct ownership:
 
@@ -824,7 +870,7 @@ A registry is justified only when **all** of these are true:
 Until then, explicit construction is cleaner:
 
 ```python
-from ehc_sn.adapters.hrm import build_goaltrace_hrm_v1_bridge
+from ehp_sn.adapters.hrm import build_goaltrace_hrm_v1_bridge
 
 bridge = build_goaltrace_hrm_v1_bridge(
     model=model,
@@ -884,11 +930,11 @@ forbidden import prefixes:
 
 ```python
 FORBIDDEN_ADAPTER_IMPORT_PREFIXES = (
-    "ehc_sn.objectives",
-    "ehc_sn.controllers",
-    "ehc_sn.eval",
-    "ehc_sn.experiments",
-    "ehc_sn.training",
+    "ehp_sn.objectives",
+    "ehp_sn.controllers",
+    "ehp_sn.evaluation",
+    "ehp_sn.experiments",
+    "ehp_sn.training",
 )
 ```
 

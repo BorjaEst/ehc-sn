@@ -115,7 +115,7 @@ class SwiGLU(nn.Module):
         Notes:
             - This module is shape-preserving in the last dimension.
             - The underlying projections are performed by
-              :class:`~ehc_sn.modules.projections.CastedLinear`.
+              :class:`~ehp_sn.modules.projections.CastedLinear`.
         """
         gate, up = self.gate_up_proj(x).chunk(2, dim=-1)
         return self.down_proj(F.silu(gate) * up)

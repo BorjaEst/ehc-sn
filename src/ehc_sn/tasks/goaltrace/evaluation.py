@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ehc_sn.eval.contracts import EvaluationCaseResult
+from ehc_sn.evaluation.contracts import EvaluationCaseResult
 from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
 from ehc_sn.types import Batch
 

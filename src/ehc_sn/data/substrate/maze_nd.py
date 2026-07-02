@@ -279,7 +279,7 @@ def build_shared_substrate(
             extent=[topo_shape[0], topo_shape[1]],
             n_samples={s: len(raw_by_split[s]) for s in _SPLITS},
             source_id=_SOURCE_ID,
-            builder="ehc_sn.data.substrate.maze_nd.build_shared_substrate",
+            builder="ehp_sn.data.substrate.maze_nd.build_shared_substrate",
             seed=seed,
             stage_params=stage_params,
             artifact_schema_version=1,

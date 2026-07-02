@@ -1,313 +1,339 @@
-"""Read-only discovery and validation of existing eval-artifact regime directories.
+"""Report loaders — resolve evaluation sources into notebook-facing read models.
 
-This module provides lightweight artifact-manifest loading and filtering.
-It does **not** load full case traces, construct models, or produce
-report artifacts.  Those responsibilities belong to the builder layer.
+Usage::
+
+    from ehc_sn.reporting import load_arena_tem_report
+
+    report = load_arena_tem_report("artifacts/evaluation/tem-v1-arena")
+    report.headline_metrics
+    report.pathway_metrics
+    report.cases
 """
 
 from __future__ import annotations
 
-import json
-import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from ehc_sn.reporting.schema import (
-    EvalArtifactReference,
-    EvalArtifactSchema,
-    RegimeKind,
-    RegimeSelector,
-    ReportSpec,
+import pandas as pd
+
+from ehc_sn.evaluation.artifact_models import (
+    EvaluationArtifactSet,
+    RegimeArtifactSet,
 )
+from ehc_sn.reporting.sources import (
+    MaterializedEvaluationSource,
+    materialize_evaluation_source,
+)
+from ehc_sn.tasks.scoring import scoring_spec_for_task
 
-# ---------------------------------------------------------------------------
-# Constants mirrored from ehc_sn.eval.artifacts (no import to avoid coupling)
-# ---------------------------------------------------------------------------
-
-_MANIFEST_FILENAME: str = "manifest.json"
-_SUCCESS_FILENAME: str = "_SUCCESS"
-_REQUIRED_SCHEMA: EvalArtifactSchema = "ehc_sn.eval.artifact.v3"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Report provenance
+# =============================================================================
 
 
-def _extract_task(
-    manifest: dict[str, object],
-) -> str:
-    """Extract the required ``task`` identity from a v3 eval artifact manifest.
+@dataclass(frozen=True)
+class ReportProvenance:
+    """Provenance metadata for a report built from one evaluation source.
 
-    v3 manifests are expected to carry ``task`` as a top-level key.
-    A missing or non-string ``task`` is treated as a schema violation.
+    All fields are derived from the evaluation artifact manifests and
+    the source resolution, never from user-supplied strings.
     """
-    task = manifest.get("task")
-    if task is None or not isinstance(task, str) or not task:
-        raise ValueError(
-            "Eval artifact manifest has missing or invalid task: "
-            f"{task!r}. task must be a non-empty string."
-        )
-    return task
+
+    source_uri: str
+    local_root: Path
+    run_id: str | None
+    evaluation_id: str
+    alias: str
+    task: str
+    model_family: str
+    regime_id: str
+    model_uri: str | None
+    dataset_uri: str | None
+    dataset_split: str | None
+    code_revision: str | None
+    artifact_schema: str
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Metric views
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ArenaMetricViews:
+    """Classified metric projections for an Arena evaluation regime.
+
+    Attributes:
+        headline: DataFrame with one row, columns being "headline" metrics
+            (primary metric and top-level scores).
+        pathway: DataFrame with one row per prediction pathway, columns
+            being pathway-specific metrics.
+    """
+
+    headline: pd.DataFrame
+    pathway: pd.DataFrame
+
+
+# =============================================================================
+# Report data models
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ArenaTemReportData:
+    """Notebook-facing read model for an Arena + TEM evaluation report.
+
+    Constructed by :func:`load_arena_tem_report`.  Notebooks consume
+    this dataclass and should not access raw artifact paths or manifest
+    dicts.
+    """
+
+    provenance: ReportProvenance
+    headline_metrics: pd.DataFrame
+    pathway_metrics: pd.DataFrame
+    cases: tuple[Any, ...]
+    validations: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
+
+
+# =============================================================================
 # Public API
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 
-def load_eval_artifact_manifest(
-    path: Path,
-) -> dict[str, object]:
-    """Load and validate one eval-artifact regime manifest from *path*.
+def load_evaluation(source_uri: str) -> EvaluationArtifactSet:
+    """Load a complete evaluation artifact set from *source_uri*.
 
-    *path* must point to a directory that contains ``manifest.json`` and
-    ``_SUCCESS``.  The manifest's ``schema`` field must equal
-    ``"ehc_sn.eval.artifact.v3"``.
+    Resolves the source (local or MLflow), reads the evaluation-level
+    manifest, and returns a typed handle.  Use ``.open_regime(regime_id)``
+    to access individual regime artifacts.
 
-    Returns
-    -------
-    dict
-        The complete manifest payload as a dict.
+    Args:
+        source_uri: Local path, ``runs:/<run_id>/<path>``, or other
+            supported MLflow artifact URI.
 
-    Raises
-    ------
-    FileNotFoundError
-        If *path* does not exist or is missing ``manifest.json``.
-    RuntimeError
-        If ``_SUCCESS`` is missing (incomplete artifact write).
-    ValueError
-        If the manifest has an unsupported ``schema`` version or
-        ``status != "complete"``.
+    Returns:
+        A fully typed :class:`EvaluationArtifactSet`.
+
+    Raises:
+        FileNotFoundError: If the source does not exist or
+            ``evaluation-manifest.json`` is missing.
     """
-    path = Path(path)
-    manifest_path = path / _MANIFEST_FILENAME
-    success_path = path / _SUCCESS_FILENAME
+    src = materialize_evaluation_source(source_uri)
+    return EvaluationArtifactSet.load(src.local_root)
 
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Missing {_MANIFEST_FILENAME} under {path}.")
-    if not success_path.exists():
-        raise RuntimeError(
-            f"Artifact at {path} is missing {_SUCCESS_FILENAME} sentinel "
-            f"(possibly an incomplete or corrupted write)."
-        )
 
-    manifest: dict[str, object] = json.loads(
-        manifest_path.read_text(encoding="utf-8")
+def load_arena_tem_report(
+    source_uri: str,
+    *,
+    regime: str = "diagnostic",
+    max_cases: int = 8,
+    case_ids: Sequence[str] = (),
+) -> ArenaTemReportData:
+    """Build a notebook-facing report for an Arena + TEM evaluation.
+
+    .. note::
+
+        This loader reads evaluation artifacts directly.  For prepared
+        report-data packages, prefer :func:`open_report` and
+        :class:`ReportDataPackage` instead.
+
+    Resolves the source, opens the specified regime, validates
+    compatibility, and projects metrics and cases into a report-specific
+    read model.
+
+    Args:
+        source_uri: Local path, ``runs:/<run_id>/<path>``, or other
+            supported MLflow artifact URI.
+        regime: Regime ID within the evaluation (default ``"diagnostic"``).
+        max_cases: Maximum number of prediction cases to include in
+            the report.  Ignored when ``case_ids`` is non-empty.
+        case_ids: If non-empty, only the specified case IDs are included
+            (overrides ``max_cases``).
+
+    Returns:
+        An :class:`ArenaTemReportData` ready for notebook consumption.
+
+    Raises:
+        FileNotFoundError: If the source does not exist.
+        KeyError: If the requested regime is not found.
+        ValueError: If the artifact is not compatible with the Arena TEM
+            report template.
+    """
+    src = materialize_evaluation_source(source_uri)
+
+    # Try evaluation-level manifest first; fall back to regime-level.
+    eval_manifest_path = src.local_root / "evaluation-manifest.json"
+    if eval_manifest_path.exists():
+        evaluation = EvaluationArtifactSet.load(src.local_root)
+        regime_artifacts = evaluation.open_regime(regime)
+        manifest = regime_artifacts.manifest
+        eval_identity = evaluation.manifest.identity
+        alias = eval_identity.alias
+        task = eval_identity.task
+        model_family = eval_identity.model_family
+        model_uri = evaluation.manifest.model.uri
+        dataset_uri = evaluation.manifest.dataset.uri
+        dataset_split = evaluation.manifest.dataset.split
+        code_revision = evaluation.manifest.code_revision
+        evaluation_id = eval_identity.evaluation_id
+    else:
+        # Legacy v1: load regime directly, synthesize identity from manifest.
+        regime_artifacts = RegimeArtifactSet.load(src.local_root)
+        manifest = regime_artifacts.manifest
+        alias = manifest.regime_id or "unknown"
+        task = manifest.task or manifest.regime_kind
+        model_family = "unknown"
+        model_uri = None
+        dataset_uri = None
+        dataset_split = None
+        code_revision = None
+        evaluation_id = f"legacy-{manifest.regime_id}"
+
+    # Validate compatibility.
+    _validate_arena_tem_artifact(regime_artifacts)
+
+    # Build metric views through the task scoring catalog.
+    scoring = scoring_spec_for_task(task)
+    metric_views = _build_arena_metric_views(regime_artifacts, scoring)
+
+    # Select cases.
+    selected_cases = _select_report_cases(
+        regime_artifacts,
+        max_cases=max_cases,
+        case_ids=case_ids,
     )
 
-    schema_value = manifest.get("schema")
-    if schema_value != _REQUIRED_SCHEMA:
+    # Build provenance.
+    provenance = ReportProvenance(
+        source_uri=source_uri,
+        local_root=src.local_root,
+        run_id=src.run_id,
+        evaluation_id=evaluation_id,
+        alias=alias,
+        task=task,
+        model_family=model_family,
+        regime_id=manifest.regime_id,
+        model_uri=model_uri,
+        dataset_uri=dataset_uri,
+        dataset_split=dataset_split,
+        code_revision=code_revision,
+        artifact_schema=manifest.schema,
+    )
+
+    return ArenaTemReportData(
+        provenance=provenance,
+        headline_metrics=metric_views.headline,
+        pathway_metrics=metric_views.pathway,
+        cases=selected_cases,
+    )
+
+
+# =============================================================================
+# Internal helpers
+# =============================================================================
+
+
+# Known Arena TEM pathway metric prefixes.
+_PATHWAY_PREFIXES = {
+    "ancestral": "accuracy_path",
+    "retrieved": "accuracy_recall",
+    "inference": "accuracy_post",
+}
+"""Map from display pathway name to metric name prefix."""
+
+
+def _build_arena_metric_views(
+    artifacts: RegimeArtifactSet,
+    scoring: Any,
+) -> ArenaMetricViews:
+    """Classify regime metrics into headline and pathway views.
+
+    Uses the ``TaskScoringSpec`` to identify metrics, then separates
+    pathway-specific metrics (``accuracy_path_*``, ``accuracy_recall_*``,
+    ``accuracy_post_*``) from headline metrics (everything else).
+    """
+    metrics = artifacts.metrics
+    domain_metrics: dict[str, float] = {}
+    pathway_rows: list[dict[str, float | str]] = []
+
+    # Separate pathway metrics from headline metrics.
+    pathway_seen: set[str] = set()
+    for path_name, prefix in _PATHWAY_PREFIXES.items():
+        all_key = f"{prefix}_all"
+        revisit_key = f"{prefix}_revisit"
+        row: dict[str, float | str] = {"pathway": path_name}
+        if all_key in metrics:
+            row["all_steps"] = metrics[all_key]
+            pathway_seen.add(all_key)
+        if revisit_key in metrics:
+            row["revisit_steps"] = metrics[revisit_key]
+            pathway_seen.add(revisit_key)
+        pathway_rows.append(row)
+
+    # Remaining metrics are headline metrics.
+    for k, v in metrics.items():
+        if k not in pathway_seen:
+            domain_metrics[k] = v
+
+    headline = pd.DataFrame([domain_metrics])
+    pathway = pd.DataFrame(pathway_rows).set_index("pathway")
+    return ArenaMetricViews(headline=headline, pathway=pathway)
+
+
+def _validate_arena_tem_artifact(artifacts: RegimeArtifactSet) -> None:
+    """Verify that a regime artifact is compatible with the Arena TEM report.
+
+    Raises ``ValueError`` if the artifact does not contain the expected
+    metrics for an Arena TEM evaluation.
+    """
+    task = artifacts.manifest.task
+    if task and task != "arena":
         raise ValueError(
-            f"Unsupported eval artifact schema: {schema_value!r}. "
-            f"Expected {_REQUIRED_SCHEMA!r}."
+            f"Cannot build Arena TEM report from task {task!r}. "
+            f"Expected task 'arena'."
         )
-
-    status = manifest.get("status", "complete")
-    if status != "complete":
-        raise RuntimeError(
-            f"Artifact at {path} has status={status!r} "
-            f"(expected 'complete')."
-        )
-
-    return manifest
+    # Additional validation can be added as needed (e.g., check for
+    # required metrics).
 
 
-def discover_eval_artifacts(
-    root: Path,
-) -> list[EvalArtifactReference]:
-    """Discover eval-artifact regime directories under *root*.
+def _select_report_cases(
+    artifacts: RegimeArtifactSet,
+    *,
+    max_cases: int,
+    case_ids: Sequence[str],
+) -> tuple[Any, ...]:
+    """Select report cases from a regime artifact.
 
-    Only **immediate children** of *root* are scanned.  Recursive discovery
-    is intentionally not part of v1.  A child is treated as a valid regime
-    artifact directory when it contains both ``manifest.json`` and
-    ``_SUCCESS``.
-
-    Children without ``manifest.json`` are silently skipped (e.g., README
-    files, scratch directories).  Children with ``manifest.json`` but
-    missing ``_SUCCESS`` or with an unsupported schema version raise an
-    error immediately.
-
-    Parameters
-    ----------
-    root:
-        Flat directory of regime artifact subdirectories.
-
-    Returns
-    -------
-    list of EvalArtifactReference
-        Regime-level references in discovery order (sorted by directory
-        name for determinism).
-
-    Raises
-    ------
-    FileNotFoundError
-        If *root* does not exist or is not a directory.
-    RuntimeError
-        If any child with ``manifest.json`` fails ``_SUCCESS`` or status
-        validation.
-    ValueError
-        If any child has an unsupported artifact schema version.
+    When ``case_ids`` is non-empty, returns only those cases.  Otherwise
+    returns up to ``max_cases`` cases from the artifact's case manifest
+    (with traces preferred).
     """
-    root = Path(root)
-    if not root.exists():
-        raise FileNotFoundError(f"Eval artifacts root does not exist: {root}")
-    if not root.is_dir():
-        raise NotADirectoryError(
-            f"Eval artifacts root is not a directory: {root}"
-        )
+    loaded_cases = artifacts.read_cases()
 
-    references: list[EvalArtifactReference] = []
+    if case_ids:
+        id_set = set(case_ids)
+        selected = [c for c in loaded_cases if c.case_id in id_set]
+    else:
+        # Prefer cases with traces, up to max_cases.
+        traced = [c for c in loaded_cases if c.trace is not None]
+        if len(traced) >= max_cases:
+            selected = traced[:max_cases]
+        else:
+            # Fill remaining slots with non-traced cases.
+            non_traced = [c for c in loaded_cases if c.trace is None]
+            selected = traced + non_traced[: max_cases - len(traced)]
 
-    # Iterate sorted children for deterministic ordering.
-    children = sorted(
-        p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")
-    )
-
-    for child_dir in children:
-        manifest_path = child_dir / _MANIFEST_FILENAME
-        # Silently skip children that are not eval artifact directories.
-        if not manifest_path.exists():
-            continue
-        # Silently skip report-run directories (they carry report_manifest.json).
-        if (child_dir / "report_manifest.json").exists():
-            continue
-
-        manifest = load_eval_artifact_manifest(child_dir)
-
-        task = _extract_task(manifest)
-        regime_id_raw = manifest.get("regime_id")
-        regime_kind_raw = manifest.get("regime_kind")
-
-        if not isinstance(regime_id_raw, str) or not regime_id_raw:
-            raise ValueError(
-                f"Eval manifest in {child_dir} has missing or invalid "
-                f"regime_id: {regime_id_raw!r}"
-            )
-        if regime_kind_raw not in ("diagnostic", "benchmark"):
-            raise ValueError(
-                f"Eval manifest in {child_dir} has unsupported "
-                f"regime_kind: {regime_kind_raw!r}"
-            )
-
-        references.append(
-            EvalArtifactReference(
-                regime_id=regime_id_raw,
-                regime_kind=regime_kind_raw,  # type: ignore[arg-type]
-                path=child_dir.resolve(),
-                task=task,
-            )
-        )
-
-    return references
+    return tuple(selected)
 
 
-def select_eval_artifacts(
-    artifacts: Sequence[EvalArtifactReference],
-    selectors: Sequence[RegimeSelector],
-) -> list[EvalArtifactReference]:
-    """Filter *artifacts* by an ordered list of selectors.
-
-    Multiple selectors are combined with **OR** semantics: an artifact
-    is included if it matches *any* selector.  Results are de-duplicated
-    while preserving discovery order (first match wins).
-
-    A selector matches when **all** of its non-``None`` fields match:
-
-    * ``task`` (if present) compares against ``artifact.task``.
-    * ``regime_kind`` (if present) compares against
-      ``artifact.regime_kind``.
-    * ``regime_ids`` (if present) checks whether ``artifact.regime_id``
-      is in the list.
-
-    Parameters
-    ----------
-    artifacts:
-        Regime-level references (typically from
-        :func:`discover_eval_artifacts`).
-    selectors:
-        Ordered list of :class:`RegimeSelector` filters.
-
-    Returns
-    -------
-    list of EvalArtifactReference
-        Matched artifacts in first-match order.
-    """
-    selected: list[EvalArtifactReference] = []
-    seen: set[str] = set()
-
-    for artifact in artifacts:
-        matched = False
-        for sel in selectors:
-            if sel.task is not None:
-                if artifact.task is None:
-                    raise ValueError(
-                        "Cannot filter eval artifacts by task because "
-                        f"artifact {artifact.path} does not declare task "
-                        "identity. Extend the eval artifact manifest to "
-                        "include task."
-                    )
-                if sel.task != artifact.task:
-                    continue
-            if (
-                sel.regime_kind is not None
-                and sel.regime_kind != artifact.regime_kind
-            ):
-                continue
-            if sel.regime_ids is not None and artifact.regime_id not in set(
-                sel.regime_ids
-            ):
-                continue
-            matched = True
-            break
-
-        if matched and artifact.regime_id not in seen:
-            seen.add(artifact.regime_id)
-            selected.append(artifact)
-
-    return selected
-
-
-# ---------------------------------------------------------------------------
-# Report-spec loader
-# ---------------------------------------------------------------------------
-
-
-def load_report_spec(path: Path) -> ReportSpec:
-    """Load a :class:`ReportSpec` from a TOML file.
-
-    Parameters
-    ----------
-    path:
-        Path to a TOML file containing ``ReportSpec`` fields.
-
-    Returns
-    -------
-    ReportSpec
-        Validated report assembly specification.
-
-    Raises
-    ------
-    FileNotFoundError
-        If *path* does not exist.
-    tomllib.TOMLDecodeError
-        If the TOML content is malformed.
-    pydantic.ValidationError
-        If the content does not conform to ``ReportSpec``.
-    """
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    return ReportSpec.model_validate(raw)
-
-
-# ============================================================================
+# =============================================================================
 __all__ = [
-    "EvalArtifactReference",
-    "EvalArtifactSchema",
-    "RegimeKind",
-    "RegimeSelector",
-    "ReportSpec",
-    "load_eval_artifact_manifest",
-    "discover_eval_artifacts",
-    "select_eval_artifacts",
-    "load_report_spec",
+    "ArenaMetricViews",
+    "ArenaTemReportData",
+    "ReportProvenance",
+    "load_arena_tem_report",
+    "load_evaluation",
 ]

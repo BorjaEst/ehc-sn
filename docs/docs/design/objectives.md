@@ -5,10 +5,42 @@ description: Differentiable scoring layer between model/runtime outputs and opti
 
 # Objectives Design Contract
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > `ehp_sn.objectives` owns the **differentiable scoring layer between
-> model/runtime outputs and optimization**. It transforms typed task,
-> controller, and model outputs into the scalar used for backpropagation,
-> named signed contributions, unreduced terms, and detached diagnostics.
+> model/runtime outputs and optimization**.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owns**              | Task scoring (token CE, field MSE); controller scoring (halt BCE, Q-value MSE); coefficient application; mask-aware reduction; `ObjectiveResult` |
+| **Must not own**      | Model execution; rollout traversal; optimizer steps; `.backward()` calls; metric accumulation; checkpointing                                     |
+| **Public API**        | `ObjectiveResult`, `ObjectiveContext`, `ACTSupervisedScorer`, `TEMObjective`, `HybridRLObjective`, `TaskStepEvaluation`                          |
+| **Allowed imports**   | `loss`, `contracts`, `types`                                                                                                                     |
+| **Forbidden imports** | `metrics` (use neutral statistics from `contracts/`), `training`, `lightning`, `evaluation`                                                      |
+| **Layer**             | L2 — Computation                                                                                                                                 |
+| **API verified**      | 🔴 Known gap: imports `metrics.token` (violates DEP-05)                                                                                          |
+
+### Transitional exceptions
+
+**`metrics.token` import**: The current implementation imports `AccuracyStats`
+and `build_token_step_metrics` from `metrics.token`. These are neutral
+sufficient-statistics types (`AccuracyStats`, `RatioStat`) that belong in
+`contracts/statistics.py`, not in `metrics/`. Once moved:
+
+- `objectives` will import from `contracts/statistics` (allowed)
+- `metrics` will import from `contracts/statistics` (allowed)
+- DEP-05 will be resolved.
+
+---
 
 This is broader than a "loss functions" package. A loss is one mathematical
 term (cross-entropy, MSE, KL divergence). An **objective** combines several
@@ -58,18 +90,18 @@ model / controller / runtime
 
 ### 1.3 What objectives do NOT own
 
-| Not owned                                | Owner                                        |
-| ---------------------------------------- | -------------------------------------------- |
-| Model forward execution                  | `ehp_sn.models`                              |
-| Recurrent state evolution                | `ehp_sn.controllers`                         |
-| Rollout traversal and step iteration     | `ehp_sn.rollouts.scoring`                    |
-| Optimizer construction and stepping      | `ehp_sn.training` or `ehp_sn.lightning`      |
-| `.backward()` calls                      | `ehp_sn.lightning`                           |
-| Logging backends (MLflow, console)       | `ehp_sn.logging`, `ehp_sn.lightning.loggers` |
-| Evaluation metric accumulation           | `ehp_sn.metrics`                             |
-| Target generation from raw datasets      | `ehp_sn.data` or task packages               |
-| Experiment selection and recipe dispatch | `scripts/` or `ehp_sn.evaluation`            |
-| Checkpointing                            | `ehp_sn.lightning`                           |
+| Not owned                                | Owner                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| Model forward execution                  | `ehp_sn.models`                                                              |
+| Recurrent state evolution                | `ehp_sn.controllers`                                                         |
+| Rollout traversal and step iteration     | `ehp_sn.rollouts.scoring`                                                    |
+| Optimizer construction and stepping      | `ehp_sn.training` or `ehp_sn.lightning`                                      |
+| `.backward()` calls                      | `ehp_sn.training` (backward policy); `ehp_sn.lightning` adapts the primitive |
+| Logging backends (MLflow, console)       | `ehp_sn.logging`, `ehp_sn.lightning.loggers`                                 |
+| Evaluation metric accumulation           | `ehp_sn.metrics`                                                             |
+| Target generation from raw datasets      | `ehp_sn.data` or task packages                                               |
+| Experiment selection and recipe dispatch | `scripts/` or `ehp_sn.evaluation`                                            |
+| Checkpointing                            | `ehp_sn.training` (policy); `ehp_sn.lightning` (storage integration)         |
 
 ### 1.4 Forbidden dependencies
 

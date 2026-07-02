@@ -1,7 +1,7 @@
 """Goaltrace prediction-reasoning selector.
 
 Produces ``GoaltracePredictionReasoningData`` from a semantic
-:class:`~ehc_sn.figures.selectors.goaltrace.GoaltraceEvaluationSample`.
+:class:`~ehp_sn.figures.selectors.goaltrace.GoaltraceEvaluationSample`.
 
 The adapter from ``TraceTree`` to ``GoaltraceEvaluationSample`` is called at
 the entry point — this module never touches raw trace keys or tree access.

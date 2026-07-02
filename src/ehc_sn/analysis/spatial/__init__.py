@@ -31,13 +31,16 @@ from ehc_sn.analysis.spatial.ratemap_stats import (
     RateMapStats,
     compute_rate_map_stats,
 )
+from ehc_sn.analysis.spatial.ratemaps import RateMapConfig, compute_rate_maps
 
 __all__ = [
     "SpatialBinGeometry",
     "GridnessResult",
     "SpacingOrientationResult",
     "RateMapStats",
+    "RateMapConfig",
     "compute_gridness",
     "estimate_grid_spacing_orientation",
     "compute_rate_map_stats",
+    "compute_rate_maps",
 ]

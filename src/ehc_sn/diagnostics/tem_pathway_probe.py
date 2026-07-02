@@ -261,7 +261,7 @@ def produce_tem_pathway_probe(  # -------------------------------------------
         RuntimeError: If model is in training mode.
     """
     if model.training:
-        raise RuntimeError("Pathway probe requires model.eval().")
+        raise RuntimeError("Pathway probe requires model.evaluation().")
 
     n_freq = len(model._config.hpc.shape)
     device = next(model.parameters()).device

@@ -58,6 +58,7 @@ MAZE_HARD_EHP_Q_HALTING_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 # =============================================================================
 
+
 def _get_world_observation_id(ctx: StepContext) -> TraceValue:
     obs_id: Tensor = ctx.record.batch["observation_id"]
     return coerce_observation_ids(obs_id)

@@ -2,7 +2,6 @@
 
 from .config import (
     SeqMazeHRMV2ComponentConfigs,
-    SeqMazeHRMV2EvaluationExperimentConfig,
     SeqMazeHRMV2ModelConfig,
     SeqMazeHRMV2TrainingExperimentConfig,
 )
@@ -14,7 +13,6 @@ __all__ = [
     "SeqMazeHRMV2ComponentConfigs",
     "SeqMazeHRMV2ModelConfig",
     "SeqMazeHRMV2TrainingExperimentConfig",
-    "SeqMazeHRMV2EvaluationExperimentConfig",
     "build_seqmaze_hrm_v2_model",
     "build_seqmaze_hrm_v2_training_experiment",
     "build_seqmaze_hrm_v2_evaluation_experiment",

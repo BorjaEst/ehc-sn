@@ -236,7 +236,7 @@ class TD0ActorCriticBatchBuilder:
         context where no live environment provides ``V(s_{t+1})``. When
         ``next_obs`` and ``carry`` are provided, the next-step critic value
         is computed from the backbone and used for bootstrap.
-        Accepts any :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingExecutionSnapshot`.
+        Accepts any :class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingExecutionSnapshot`.
 
         Args:
             record: Interaction record from the controller step.
@@ -324,9 +324,9 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
 class ZeroBootstrapActorCriticValidationScorer:
     """Zero-bootstrap validation scorer for value-control models.
 
-    Adapts a :class:`~ehc_sn.rollouts.StepRecord` (whose ``outputs`` field
-    must be a :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`)
-    into a :class:`~ehc_sn.objectives.hybrid_rl.HybridValueBatch` with zero
+    Adapts a :class:`~ehp_sn.rollouts.StepRecord` (whose ``outputs`` field
+    must be a :class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`)
+    into a :class:`~ehp_sn.objectives.hybrid_rl.HybridValueBatch` with zero
     bootstrap values via :func:`_zero_bootstrap_batch`, then calls
     :meth:`HybridRLObjective.compute_step`.
 
@@ -334,7 +334,7 @@ class ZeroBootstrapActorCriticValidationScorer:
     This is the same canonical construction path used by
     :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`.
 
-    Satisfies the :class:`~ehc_sn.objectives.rollout.RolloutScorer` protocol.
+    Satisfies the :class:`~ehp_sn.objectives.rollout.RolloutScorer` protocol.
     """
 
     def __init__(  # ----------------------------------------------------------
@@ -367,7 +367,7 @@ class ZeroBootstrapActorCriticValidationScorer:
         :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`.
 
         Returns:
-            :class:`~ehc_sn.objectives.hybrid_rl.HybridRLObjectiveStep` with
+            :class:`~ehp_sn.objectives.hybrid_rl.HybridRLObjectiveStep` with
             zero-bootstrap RL diagnostics.
 
         Raises:

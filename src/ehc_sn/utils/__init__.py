@@ -2,7 +2,6 @@ import datetime
 import logging
 import math
 import os
-import warnings
 from dataclasses import fields, is_dataclass, replace
 from itertools import combinations
 from pathlib import Path
@@ -50,25 +49,6 @@ def inv_var_weight(
     inv_var_sigma = torch.sqrt(inv_var_var.clamp_min(eps))
 
     return inv_var_avg, inv_var_sigma
-
-
-def has_any_grad(
-    opt: Any,
-) -> bool:
-    warnings.warn(
-        "has_any_grad is deprecated for training control-plane logic; "
-        "use only for diagnostics and assertions. "
-        "Remove the guard: stepping an active optimizer with zero gradients "
-        "is harmless and avoids scheduler drift.",
-        FutureWarning,
-        stacklevel=2,
-    )
-    raw_opt = getattr(opt, "optimizer", opt)
-    return any(
-        param.grad is not None
-        for group in raw_opt.param_groups
-        for param in group["params"]
-    )
 
 
 def find_multiple(

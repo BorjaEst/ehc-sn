@@ -291,7 +291,7 @@ class Datamodule(L.LightningDataModule):
             world_size: Total number of processes. Default ``1``.
 
         Returns:
-            Ordered list of :attr:`~ehc_sn.data.index.DatasetIndexEntry.id`
+            Ordered list of :attr:`~ehp_sn.data.index.DatasetIndexEntry.id`
             values for the requested batch.  Returns an empty list when
             the datamodule has not been set up. Partial final batches are
             returned when present.

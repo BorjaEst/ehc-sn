@@ -6,7 +6,7 @@
 | ------------- | ---------------------------------------------- |
 | Task name     | `mazehard`                                     |
 | Benchmark     | dense spatial classification over maze grids   |
-| Package path  | `src/ehc_sn/tasks/mazehard/`                   |
+| Package path  | `src/ehp_sn/tasks/mazehard/`                   |
 | CLI script    | `scripts/data-gen/build-mazehard.py`           |
 | Output path   | `data/processed/mazehard/<corpus>/v<version>/` |
 | Dataset class | `task_corpus`                                  |

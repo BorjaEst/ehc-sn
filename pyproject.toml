@@ -3,8 +3,8 @@
     build-backend = "setuptools.build_meta"
 
 [project]
-    name = "ehc-sn"
-    description = "Entorhinal-Hippocampal Circuit (EHC) Spatial Navigation library"
+    name = "ehp-sn"
+    description = "Entorhinal-Hippocampal Circuit (EHP) Spatial Navigation library"
     authors = [{ name = "Borja Esteban Sanchis" }]
     license = { text = "GNU General Public License v3.0" }
     classifiers = [
@@ -47,6 +47,7 @@
         "dungeongen",
         "typer",
         "markdown",
+        "tomli_w",
     ]
 
 [project.optional-dependencies]
@@ -62,25 +63,33 @@
         "mkdocs",
         "mkdocstrings[python]",
     ]
+    evaluation = [
+        "zarr~=3.1.0",
+        "pyarrow",
+        "mlflow",
+    ]
 
 [project.urls]
-    "Homepage"      = "https://github.com/BorjaEst/ehc-sn"
-    "Bug Tracker"   = "https://github.com/BorjaEst/ehc-sn/issues"
-    "Documentation" = "https://ehc-sn.readthedocs.io"
+    "Homepage"      = "https://github.com/BorjaEst/ehp-sn"
+    "Bug Tracker"   = "https://github.com/BorjaEst/ehp-sn/issues"
+    "Documentation" = "https://ehp-sn.readthedocs.io"
 
 [tool.setuptools]
     package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
     where   = ["src"]
-    include = ["ehc_sn*"]
+    include = ["ehp_sn*"]
+
+[project.scripts]
+    ehp-sn = "ehp_sn.cli:app"
 
 [tool.setuptools.dynamic]
-    version = { file = "src/ehc_sn/VERSION" }
+    version = { file = "src/ehp_sn/VERSION" }
     readme  = { file = ["README.md"] }
 
 [tool.setuptools.package-data]
-    ehc_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
+    ehp_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
 
 [tool.black]
     line-length    = 80
@@ -90,7 +99,7 @@
 [tool.isort]
     profile           = "black"
     line_length       = 80
-    known_first_party = ["ehc_sn"]
+    known_first_party = ["ehp_sn"]
 
 [tool.mypy]
     python_version           = "3.12"

@@ -3,12 +3,35 @@ title: Reporting Design Contract
 description: Report composition boundary — selection, normalisation, composition, serialisation, rendering, and publication of evaluation evidence
 ---
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 # Reporting Design Contract (`ehp_sn.reporting`)
 
 > A deterministic application service that selects existing evaluation
 > evidence, normalises it, composes it according to a report definition,
 > and exposes the result for notebooks, serialisation, rendering, or
 > publication.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Report definitions, requests, source resolution; evidence normalisation; composition; serialisation; rendering; publication                    |
+| **Must not own**      | Model execution; metric computation; evaluation results; trace capture; figure rendering; scientific analysis                                  |
+| **Public API**        | `ReportResult`, `ReportDefinition`, `ReportRequest`, `ReportSource`, `ReportContext`, `ReportDataPackage`, `open_report`                       |
+| **Allowed imports**   | `evaluation` (contracts only), `figures` (FigureArtifact), `analysis` (AnalysisResult), `diagnostics` (DiagnosticReport), `contracts`, `types` |
+| **Forbidden imports** | `models`, `training`, `lightning`, `controllers`, `objectives`                                                                                 |
+| **Layer**             | L6 — Post-Processing & Presentation                                                                                                            |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                                  |
+
+---
 
 The canonical flow:
 
@@ -83,7 +106,7 @@ reporting =
 ```mermaid
 flowchart TB
     subgraph Upstream["Evidence producers"]
-        EVAL["ehp_sn.evaluation<br/>evaluation artifacts"]
+        evaluation["ehp_sn.evaluation<br/>evaluation artifacts"]
         MET["ehp_sn.metrics<br/>metric definitions"]
         ANALYSIS["ehp_sn.analysis<br/>derived scientific results"]
         DIAG["ehp_sn.diagnostics<br/>diagnostic findings"]
@@ -108,7 +131,7 @@ flowchart TB
         ML["MLflow publications"]
     end
 
-    EVAL --> SRC
+    evaluation --> SRC
     MET --> DEF
     ANALYSIS --> DEF
     DIAG --> DEF
@@ -361,7 +384,7 @@ schema = "ehp_sn.report.request.v1"
 name = "arena-tem-diagnostic"
 
 [source]
-uri = "artifacts/eval/tem-v2-arena"
+uri = "artifacts/evaluation/tem-v2-arena"
 regime = "diagnostic"
 
 [parameters]
@@ -1046,7 +1069,7 @@ The notebook API should be generic and stable.
 from ehp_sn.reporting.loaders import load_arena_tem_report
 
 data = load_arena_tem_report(
-    "artifacts/eval/tem-v1-arena",
+    "artifacts/evaluation/tem-v1-arena",
     regime="test",
     max_cases=20,
 )
@@ -1263,8 +1286,8 @@ Phase 3 (later):      Remove load_arena_tem_report() and ArenaTemReportData
 
 ### Unaffected components
 
-- `eval/artifact_models.py` — no change (still the source of truth).
-- `eval/artifacts.py` — no change.
+- `evaluation/artifact_models.py` — no change (still the source of truth).
+- `evaluation/artifacts.py` — no change.
 - All model/task/training code — no change.
 - All figures/diagnostics — no change.
 - All notebooks consuming `load_arena_tem_report` — add deprecation warning,

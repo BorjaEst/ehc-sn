@@ -2,7 +2,7 @@
 
 Renders registered figures from validation traces at a configurable cadence
 and persists results to disk (PDF/PNG) and TensorBoard.  This is a simpler
-alternative to :class:`~ehc_sn.callbacks.evaluation.EvaluationRegimesCallback`
+alternative to :class:`~ehp_sn.callbacks.evaluation.EvaluationRegimesCallback`
 that works without requiring a provider-based regime setup.
 
 Resource budgeting (``max_items``, ``max_cells``, ``max_retained_files``)
@@ -21,6 +21,7 @@ from lightning.pytorch import LightningModule, Trainer
 from pydantic import BaseModel, Field, model_validator
 
 from ehc_sn.figures import REGISTRY, FigureContext, list_figures, render
+from ehc_sn.figures.registry import FigureSurface
 from ehc_sn.figures.sinks import (
     _persist_named_figure_artifacts,
     log_tensorboard_figure,
@@ -38,7 +39,7 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
         testing    — fires inside ``on_test_epoch_end``.
 
     Offline generation bypasses the callback entirely — call
-    ``ehc_sn.figures.render`` directly.
+    ``ehp_sn.figures.render`` directly.
     """
 
     enabled: bool = Field(
@@ -135,7 +136,7 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
             name
             for name in self.figures
             if name in available
-            and "report" in REGISTRY.get(name).allowed_surfaces
+            and FigureSurface.REPORT in REGISTRY.get(name).allowed_surfaces
         ]
         if report_kind:
             blocked = ", ".join(sorted(set(report_kind)))
@@ -145,40 +146,31 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
                 "Use the offline report pipeline for these."
             )
 
+        from ehc_sn.figures.registry import TraceInputs
+
         non_bounded = [
             name
             for name in self.figures
             if name in available
-            and REGISTRY.get(name).input_contract != "bounded_trace"
+            and not isinstance(REGISTRY.get(name).inputs, TraceInputs)
         ]
         if non_bounded:
             lines: list[str] = [
-                "FigureGenerationCallback only supports bounded_trace figures.",
+                "FigureGenerationCallback only supports TraceInputs figures.",
             ]
             for name in sorted(set(non_bounded)):
                 spec = REGISTRY.get(name)
                 lines.append("")
                 lines.append(f"  {name}")
-                lines.append(f"    requires: {spec.input_contract}")
-                if spec.input_contract == "evaluation_artifact":
-                    lines.append(
-                        "    Use: add this figure to an EvaluationRegimesCallback "
-                        "regime to capture full eval artifacts, "
-                        "then render it offline with render_report()."
-                    )
-                elif spec.input_contract == "offline_artifact":
-                    lines.append(
-                        "    Use: render this figure offline with "
-                        "render_report(...) from a persisted eval artifact run."
-                    )
+                lines.append(f"    requires: {spec.contract_kind}")
             lines.append("")
             lines.append(
-                "Valid bounded_trace figures: "
+                "Valid TraceInputs figures: "
                 + ", ".join(
                     sorted(
                         name
                         for name in available
-                        if REGISTRY.get(name).input_contract == "bounded_trace"
+                        if isinstance(REGISTRY.get(name).inputs, TraceInputs)
                     )
                 )
             )
@@ -195,7 +187,7 @@ class FigureGenerationCallback(pl.Callback):
       to enable trace capture with the needed keys.
     - **on_validation_epoch_end** / **on_test_epoch_end**: Reads captured
       ``diagnostic_traces`` from the module, gates by cadence, and renders
-      registered diagnostic figures via the ``ehc_sn.figures`` pipeline.
+      registered diagnostic figures via the ``ehp_sn.figures`` pipeline.
 
     The callback does not accumulate traces — it only consumes what the module
     exposes via ``diagnostic_traces``.
@@ -227,18 +219,22 @@ class FigureGenerationCallback(pl.Callback):
             return
 
         required_keys: set[str] = set()
+        from ehc_sn.figures.registry import TraceInputs
+
         for name in self.settings.figures:
             if name not in REGISTRY:
                 continue
             spec = REGISTRY.get(name)
-            if spec.input_contract != "bounded_trace":
-                continue
-            if not spec.trace_keys:
-                raise ValueError(
-                    f"Figure {name!r} has input_contract='bounded_trace' but "
-                    "declares empty trace_keys; cannot derive required keys."
-                )
-            required_keys.update(spec.trace_keys)
+            match spec.inputs:
+                case TraceInputs(trace_keys=tk, meta_keys=mk):
+                    if not tk:
+                        raise ValueError(
+                            f"Figure {name!r} uses TraceInputs but "
+                            "declares empty trace_keys; cannot derive required keys."
+                        )
+                    required_keys.update(tk)
+                case _:
+                    continue
 
         if not required_keys:
             return

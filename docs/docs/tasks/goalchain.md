@@ -29,7 +29,7 @@ extracts it from a pre-trained arena model and provides it as conditioning.
 Canonical package path:
 
 ```text
-src/ehc_sn/tasks/goalchain/
+src/ehp_sn/tasks/goalchain/
 ```
 
 `goalchain` tests whether a model can use a learned episodic memory state

@@ -60,7 +60,7 @@ def build_mazehard_hrm_v1_model(
             are used.
         training_config: Training-only settings (optimizer, runtime).
             ``None`` during evaluation-only construction.
-        execution: Execution policy for eval-time rollout bounds.
+        execution: Execution policy for evaluation-time rollout bounds.
             Used only when ``training_config`` is ``None``.
     """
     components: ACTSupervisedComponentConfigs = config.components  # type: ignore[assignment]

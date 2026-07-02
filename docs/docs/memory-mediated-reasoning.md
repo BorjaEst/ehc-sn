@@ -12,7 +12,7 @@ dynamics, slot layout, fixed-slot-names principle) is documented separately in
 [PFC Working Memory Theory](../pfc-working-memory-theory.md). The five
 theoretical ingredients (TEM, transformer-hippocampus, structured PFC,
 hierarchical reasoning, top-down control) are documented in
-[EHP Theory Foundations](../ehc-theory-foundations.md).
+[EHP Theory Foundations](../ehp-theory-foundations.md).
 
 ### Notation
 

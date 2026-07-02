@@ -1,4 +1,14 @@
-"""Online actor-critic (RL) controller family subpackage.
+"""Online actor-critic (RL) controller family.
 
-Canonical leaf module: :mod:`ehc_sn.controllers.online.actor_critic`.
+Leaf module: :mod:`ehp_sn.controllers.online.actor_critic`.
 """
+
+from ehc_sn.controllers.online.actor_critic import (
+    RLController,
+    RLControllerConfig,
+)
+
+__all__ = [
+    "RLController",
+    "RLControllerConfig",
+]

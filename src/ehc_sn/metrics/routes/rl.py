@@ -1,15 +1,15 @@
 """Routing tables for HRM v2 value-control (Reinforcement Learning).
 
 These routes map metric keys to dotted attribute paths on
-:class:`~ehc_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
-object produced by :class:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective` via
-:meth:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective.compute_step`.
+:class:`~ehp_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
+object produced by :class:`~ehp_sn.objectives.hybrid_rl.HybridRLObjective` via
+:meth:`~ehp_sn.objectives.hybrid_rl.HybridRLObjective.compute_step`.
 
 The hybrid RL path is a **learner-owned batch-loss path**, not a rollout-scoring
 objective.  These routes are consumed by
-:func:`~ehc_sn.metrics.rollout.update_metric_collection_from_evaluated_chunk`
+:func:`~ehp_sn.metrics.rollout.update_metric_collection_from_evaluated_chunk`
 for both training and validation (where the scorer is
-:class:`~ehc_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`).
+:class:`~ehp_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`).
 """
 
 from ehc_sn.metrics.adapter import Route

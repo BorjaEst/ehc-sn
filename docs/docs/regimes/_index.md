@@ -55,13 +55,13 @@ trajectories to learn a world model without adaptive depth.
 Implemented regimes are coordinated through common lower-layer
 infrastructure:
 
-- **Rollout runners** (`ehc_sn.rollouts.runtime`) execute recurrent steps
+- **Rollout runners** (`ehp_sn.rollouts.runtime`) execute recurrent steps
   and capture per-step records.
-- **Objective composites** (`ehc_sn.objectives.composites`) compute loss
+- **Objective composites** (`ehp_sn.objectives.composites`) compute loss
   terms from step records without knowing about controller internals.
-- **Metrics and reducers** (`ehc_sn.metrics`) aggregate per-step
+- **Metrics and reducers** (`ehp_sn.metrics`) aggregate per-step
   statistics into epoch-level summaries.
-- **Evaluation executors** (`ehc_sn.eval`) run diagnostic and benchmark
+- **Evaluation executors** (`ehp_sn.evaluation`) run diagnostic and benchmark
   evaluation passes independent of the training path.
 
 ## Legacy naming

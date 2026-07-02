@@ -351,7 +351,7 @@ def build_mazehard_task_corpus(
             extent=parent_extent,
             n_samples=split_counts,
             source_id="huggingface/maze_hard_augmented",
-            builder="ehc_sn.tasks.mazehard.build_mazehard_task_corpus",
+            builder="ehp_sn.tasks.mazehard.build_mazehard_task_corpus",
             seed=seed,
             stage_params=stage_params,
             task_schema_version=1,

@@ -33,7 +33,7 @@ from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    """Render the Arena task overview figure from a persisted eval trace.
+    """Render the Arena task overview figure from a persisted evaluation trace.
 
     Args:
         trace: ``TraceTree`` containing ``arena/*`` keys.

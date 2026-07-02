@@ -1,58 +1,53 @@
 # Scripts
 
 CLI entry points for the EHP-SN project. Scripts call library APIs from
-`ehc_sn.*` — they contain no business logic, metric computation, adapter
+`ehp_sn.*` — they contain no business logic, metric computation, adapter
 dispatch, or figure rendering.
 
 ## Evaluation
 
-**Script:** `scripts/evaluation/run_eval.py` (generic) + per-task aliases
-
-The generic CLI exposes three subcommands: `run`, `inspect`, `benchmark`.
-Per-task aliases bind a default config for convenience.
-
-All evaluation logic lives in `src/ehc_sn.eval` — scripts are thin wrappers.
-
-### Run — execute a checkpoint against an experiment config
+Evaluation is managed through a single CLI entry point installed as `ehp`:
 
 ```bash
-# Generic (any experiment):
-python scripts/evaluation/run_eval.py run \
-    --config config/evaluation/hrm-v1-mazehard.toml \
-    --checkpoint checkpoints/hrm-v1/best.ckpt \
-    --output artifacts/eval/mazehard-example \
-    --device cpu
+ehp evaluation run ALIAS --model MODEL_REF [OPTIONS]
+```
 
-# Per-task alias (same, without --config):
-python scripts/evaluation/mazehard/hrm_v1.py run \
-    --checkpoint checkpoints/hrm-v1/best.ckpt \
-    --output artifacts/eval/mazehard-example \
-    --device cpu
+The alias selects a registered task--model evaluation recipe. See
+`ehp evaluation run --help` for all supported options.
+
+### Run — execute a checkpoint against a recipe
+
+```bash
+ehp evaluation run arena-tem-v1 \
+    --model models/tem-v1-arena/best.pt \
+    --device auto
+
+ehp evaluation run mazehard-hrm-v1 \
+    --model checkpoints/hrm-v1-mazehard/best.ckpt \
+    --split test \
+    --count 64
 ```
 
 ### Inspect — read a completed evaluation artifact
 
 ```bash
-python scripts/evaluation/run_eval.py inspect \
-    artifacts/eval/mazehard-example \
-    --case 0 --list-fields
+ehp evaluation inspect artifacts/evaluation/arena-tem-v1-20260627/
+
+ehp evaluation inspect artifacts/evaluation/mazehard-hrm-v1/ --gallery
 ```
 
-### Benchmark — not yet implemented
+### Supported aliases
 
-```bash
-python scripts/evaluation/run_eval.py benchmark placeholder
+```
+arena-tem-v1
+arena-tem-v2
+goaltrace-hrm-v1
+mazehard-hrm-v1
+mazehard-hrm-v2
+routebind-hrm-v1
+seqmaze-hrm-v1
+seqmaze-hrm-v2
 ```
 
-### Available aliases
-
-| Command | Default config |
-|---|---|
-| `scripts/evaluation/mazehard/hrm_v1.py run` | `config/evaluation/hrm-v1-mazehard.toml` |
-| `scripts/evaluation/mazehard/hrm_v2.py run` | `config/evaluation/hrm-v2-mazehard.toml` |
-| `scripts/evaluation/goaltrace/hrm_v1.py run` | `config/evaluation/hrm-v1-goaltrace.toml` |
-| `scripts/evaluation/routebind/hrm_v1.py run` | `config/evaluation/hrm-v1-routebind.toml` |
-| `scripts/evaluation/seqmaze/hrm_v1.py run` | `config/evaluation/hrm-v1-seqmaze.toml` |
-| `scripts/evaluation/seqmaze/hrm_v2.py run` | `config/evaluation/hrm-v2-seqmaze.toml` |
-| `scripts/evaluation/arena/tem_v1.py run` | `config/evaluation/tem-v1-arena.toml` |
-| `scripts/evaluation/arena/tem_v2.py run` | `config/evaluation/tem-v2-arena.toml` |
+Legacy experiment IDs (e.g. `tem-v1-arena`) are accepted with a deprecation
+warning.

@@ -1,6 +1,6 @@
 """Task-owned evaluation case providers for the arena task family.
 
-These providers implement :class:`~ehc_sn.eval.contracts.EvaluationSourceProvider`
+These providers implement :class:`~ehp_sn.evaluation.contracts.EvaluationSourceProvider`
 and supply batched arena replay cases to named evaluation regimes.
 
 Ownership rules:
@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.data.manifest import read_manifest
-from ehc_sn.eval.contracts import EvaluationCaseBatch
+from ehc_sn.evaluation.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.arena.traces import ArenaEvaluationSourceContext
 
 
@@ -165,7 +165,7 @@ class ArenaReplayProvider:
                 across batches).  ``max_batches`` takes precedence.
 
         Yields:
-            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehp_sn.evaluation.contracts.EvaluationCaseBatch` items with
             arena channel tensors, a deterministic ``case_id``, and split metadata.
         """
         data_root = self._dataset_path
@@ -275,7 +275,7 @@ class ArenaFixedProbeProvider:
     """Arena-task-owned provider that evaluates a fixed, explicitly-named set of samples.
 
     Use this for diagnostic regimes that must be reproducible across runs and checkpoints:
-    you supply the exact :attr:`~ehc_sn.data.index.DatasetIndexEntry.id` values to load,
+    you supply the exact :attr:`~ehp_sn.data.index.DatasetIndexEntry.id` values to load,
     and the provider yields them in stable order every time.
 
     This provider is diagnostic-only.  It does not make benchmark claims and
@@ -286,7 +286,7 @@ class ArenaFixedProbeProvider:
     - ``dataset_path`` (*str*, required): Path to the processed dataset root.
     - ``split`` (*str*, default ``"val"``): Dataset split that contains the samples.
     - ``sample_ids`` (*list[str]*, required): Ordered list of
-      :attr:`~ehc_sn.data.index.DatasetIndexEntry.id` values to load.  Must be
+      :attr:`~ehp_sn.data.index.DatasetIndexEntry.id` values to load.  Must be
       non-empty, contain no duplicates, and all ids must exist in the index.
     - ``batch_size`` (*int*, default ``1``): Episodes per evaluation case batch.
       When ``batch_size == 1`` the single sample id is used as ``case_id`` directly.
@@ -336,7 +336,7 @@ class ArenaFixedProbeProvider:
             max_batches: If > 0, stop after this many batches; otherwise yield all.
 
         Yields:
-            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehp_sn.evaluation.contracts.EvaluationCaseBatch` items with
             arena channel tensors, a deterministic ``case_id``, and probe metadata.
 
         Raises:

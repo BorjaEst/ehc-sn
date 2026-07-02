@@ -14,9 +14,15 @@ from ehc_sn.lightning.modules.act_supervised import (
     ACTSupervisedModule,
     ACTSupervisedTrainingConfig,
 )
+from ehc_sn.model_artifacts.assembly import ModelAssembly
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
-from ehc_sn.training.runner import TrainingExperiment
+from ehc_sn.training.runner import (
+    TrainingArtifactSpec,
+    TrainingExperiment,
+)
+
+_HRM_V1_CAPABILITIES = frozenset({"deliberative", "analytic-future-state"})
 
 from .config import (
     MazeHardHRMV1TrainingExperimentConfig,
@@ -64,12 +70,31 @@ def build_mazehard_hrm_v1_training_experiment(
     )
     datamodule.attach_source_provider(lambda: module._train_source)
 
+    artifact_spec = TrainingArtifactSpec(
+        model_family="hrm-v1",
+        model_type="hrm-v1",
+        capabilities=_HRM_V1_CAPABILITIES,
+        resolved_assembly_config=ModelAssembly(
+            model_family="hrm-v1",
+            model_type="hrm-v1",
+            core=module.model.config.model_dump(
+                mode="python", exclude_none=True
+            ),
+            adapter=config.model.components.adapter.model_dump(
+                mode="python", exclude_none=True
+            ),
+            controller=config.model.components.controller.model_dump(
+                mode="python", exclude_none=True
+            ),
+        ),
+    )
     return TrainingExperiment(
         module=module,
         datamodule=datamodule,
         trainer=config.trainer,
         checkpointing=config.checkpointing,
         logging=config.logging,
+        artifact_spec=artifact_spec,
     )
 
 

@@ -3,10 +3,10 @@ family-specific training helpers.
 
 Sub-modules:
 
-- :mod:`~ehc_sn.training.hrm` — HRM runtime config and weight-loading.
-- :mod:`~ehc_sn.training.tem` — TEM runtime config, schedules, and weight-loading.
-- :mod:`~ehc_sn.training.ehp` — EHP weight-loading helpers.
-- :mod:`~ehc_sn.training.gradients` — gradient diagnostic helpers.
+- :mod:`~ehp_sn.training.hrm` — HRM runtime config and weight-loading.
+- :mod:`~ehp_sn.training.tem` — TEM runtime config, schedules, and weight-loading.
+- :mod:`~ehp_sn.training.ehp` — EHP weight-loading helpers.
+- :mod:`~ehp_sn.training.gradients` — gradient diagnostic helpers.
 """
 
 from ehc_sn.training.rollout import (

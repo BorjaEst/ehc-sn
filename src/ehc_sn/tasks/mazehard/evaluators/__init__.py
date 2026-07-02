@@ -3,9 +3,9 @@
 
 Sub-modules:
 
-- :mod:`ehc_sn.tasks.mazehard.evaluators.step` — step evaluation
-  (:class:`~ehc_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluator`)
-  and config (:class:`~ehc_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluatorConfig`).
+- :mod:`ehp_sn.tasks.mazehard.evaluators.step` — step evaluation
+  (:class:`~ehp_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluator`)
+  and config (:class:`~ehp_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluatorConfig`).
 """
 
 from ehc_sn.tasks.mazehard.evaluators import step

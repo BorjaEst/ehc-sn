@@ -23,7 +23,9 @@ def plot_spatial_autocorrelogram(
     vmax: float | None = None,
     cmap: str = "coolwarm",
     min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
-    display_lag_radius_world: float | None = DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD,
+    display_lag_radius_world: (
+        float | None
+    ) = DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD,
 ) -> Axes:
     """Plot a 2D spatial autocorrelogram from a prepared rate map.
 
@@ -86,7 +88,9 @@ def _display_autocorrelogram_slices(
     if display_lag_radius_world is None:
         return None
     if display_lag_radius_world <= 0:
-        raise ValueError(f"display_lag_radius_world must be > 0, got {display_lag_radius_world}.")
+        raise ValueError(
+            f"display_lag_radius_world must be > 0, got {display_lag_radius_world}."
+        )
 
     pixel_radii = _lag_radius_pixels_from_world(
         prepared_rate_map,
@@ -134,7 +138,9 @@ def _lag_radius_pixels_from_world(
     )
 
 
-def _world_units_per_pixel(min_coord: float, max_coord: float, n_pixels: int) -> float | None:
+def _world_units_per_pixel(
+    min_coord: float, max_coord: float, n_pixels: int
+) -> float | None:
     """Return the display-world span represented by one raster step."""
     if n_pixels <= 1:
         return None
@@ -169,7 +175,9 @@ def plot_radial_autocorrelogram_profile(
     ax.set_xlabel("Radius (pixels)")
     ax.set_ylabel("Autocorrelation")
     ax.set_title("Radial autocorrelogram (±1 std)")
-    ax.legend(frameon=False, fontsize=6, ncol=2, loc="upper left", handlelength=1.0)
+    ax.legend(
+        frameon=False, fontsize=6, ncol=2, loc="upper left", handlelength=1.0
+    )
     return ax
 
 
@@ -180,7 +188,11 @@ def _summarize_radial_autocorrelogram_profiles(
     min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
 ) -> tuple[NDArray, NDArray, NDArray, int]:
     autocorrelograms = [
-        compute_spatial_autocorrelogram(prepared_rate_map.rate_map, prepared_rate_map.valid_mask, min_overlap=min_overlap)
+        compute_spatial_autocorrelogram(
+            prepared_rate_map.rate_map,
+            prepared_rate_map.valid_mask,
+            min_overlap=min_overlap,
+        )
         for prepared_rate_map in prepared_rate_maps
     ]
     return _summarize_radial_profiles(autocorrelograms, n_bins=n_bins)
@@ -205,7 +217,13 @@ def _summarize_radial_profiles(
             finite = np.isfinite(profile)
             if finite.sum() < 2:
                 continue
-            profile = np.interp(reference_radii, radii[finite], profile[finite], left=np.nan, right=np.nan)
+            profile = np.interp(
+                reference_radii,
+                radii[finite],
+                profile[finite],
+                left=np.nan,
+                right=np.nan,
+            )
         profiles.append(profile)
 
     if not profiles or reference_radii is None:
@@ -252,7 +270,9 @@ def compute_spatial_autocorrelogram(
         raise ValueError("rate_map and valid_mask must have the same shape")
 
     height, width = values.shape
-    autocorrelogram = np.full((2 * height - 1, 2 * width - 1), np.nan, dtype=float)
+    autocorrelogram = np.full(
+        (2 * height - 1, 2 * width - 1), np.nan, dtype=float
+    )
 
     for lag_y in range(-(height - 1), height):
         src_y, dst_y = _overlap_slices(height, lag_y)
@@ -269,16 +289,23 @@ def compute_spatial_autocorrelogram(
             target_values = target[pair_mask]
             source_centered = source_values - float(np.mean(source_values))
             target_centered = target_values - float(np.mean(target_values))
-            denom = float(np.linalg.norm(source_centered) * np.linalg.norm(target_centered))
+            denom = float(
+                np.linalg.norm(source_centered)
+                * np.linalg.norm(target_centered)
+            )
             if denom <= 0.0:
                 continue
 
-            autocorrelogram[lag_y + height - 1, lag_x + width - 1] = float(np.dot(source_centered, target_centered) / denom)
+            autocorrelogram[lag_y + height - 1, lag_x + width - 1] = float(
+                np.dot(source_centered, target_centered) / denom
+            )
 
     return autocorrelogram
 
 
-def radial_profile(autocorrelogram: NDArray, *, n_bins: int = 32) -> tuple[NDArray, NDArray]:
+def radial_profile(
+    autocorrelogram: NDArray, *, n_bins: int = 32
+) -> tuple[NDArray, NDArray]:
     """Compute a radial profile from a 2D autocorrelogram.
 
     Args:
@@ -329,10 +356,16 @@ def plot_spatial_autocorrelogram_mosaic(
     vmax: float | None = None,
     cmap: str = "coolwarm",
     min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
-    display_lag_radius_world: float | None = DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD,
+    display_lag_radius_world: (
+        float | None
+    ) = DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD,
 ) -> Sequence[Axes]:
     """Render a mosaic of spatial autocorrelograms from prepared rate maps."""
-    axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else ([axes] if isinstance(axes, Axes) else list(axes))
+    axes_list = (
+        list(np.ravel(axes))
+        if isinstance(axes, np.ndarray)
+        else ([axes] if isinstance(axes, Axes) else list(axes))
+    )
     if not axes_list:
         return axes_list
 

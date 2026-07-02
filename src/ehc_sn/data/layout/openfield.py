@@ -1,6 +1,6 @@
 """Openfield layout generator — legacy-TEM-compatible square, rectangle, and future hex worlds.
 
-Generates :class:`~ehc_sn.data.layout.SpatialLayout` records that match the
+Generates :class:`~ehp_sn.data.layout.SpatialLayout` records that match the
 topology, sensory assignment, and action semantics of the legacy TEM
 environment generator (``legacy_tem/tem_tf2/environments.py``).
 
@@ -429,7 +429,7 @@ def load_openfield_layouts(
     """Load openfield layouts — delegates to :func:`load_layout_dataset`.
 
     Provided for backward compatibility; prefer calling
-    :func:`~ehc_sn.data.layout.io.load_layout_dataset` directly.
+    :func:`~ehp_sn.data.layout.io.load_layout_dataset` directly.
     """
     from ehc_sn.data.layout.io import load_layout_dataset
 

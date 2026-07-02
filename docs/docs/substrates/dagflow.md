@@ -9,7 +9,7 @@
 | Source         | synthetic (procedural generation)           |
 | Source ID      | `synthetic/dagflow`                         |
 | CLI script     | `scripts/data-gen/build-dagflow.py`         |
-| Builder module | `ehc_sn.data.substrate.dagflow`             |
+| Builder module | `ehp_sn.data.substrate.dagflow`             |
 | Output path    | `data/interim/dagflow/<preset>/v<version>/` |
 | Dataset class  | `semantic_graph_dataset`                    |
 

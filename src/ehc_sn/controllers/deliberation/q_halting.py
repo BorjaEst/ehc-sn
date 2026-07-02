@@ -2,12 +2,12 @@
 
 This controller drives a value-control backbone through slot-based deliberation
 steps.  Reward, termination, and observation dynamics are delegated to an
-injected :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`, keeping the
+injected :class:`~ehp_sn.contracts.task_runtime.TaskRuntime`, keeping the
 controller generic over task semantics.
 
-Emits one :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
-per step.  No ``env_td``, no :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`,
-no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`,
+Emits one :class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
+per step.  No ``env_td``, no :class:`~ehp_sn.contracts.task_step.TaskStepEvaluator`,
+no :class:`~ehp_sn.contracts.task_environment.TaskEnvironmentAdapter`,
 no TorchRL dependency.
 
 Canonical import path::
@@ -70,12 +70,12 @@ class DeliberationQHaltingRolloutState[ModelState, RuntimeStateT](
     """Controller carry/state for deliberation Q-halting rollouts.
 
     Does not contain ``env_td`` and does not depend on
-    :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter` or
-    :class:`~ehc_sn.controllers.online.actor_critic.RLRolloutState`.
+    :class:`~ehp_sn.contracts.task_environment.TaskEnvironmentAdapter` or
+    :class:`~ehp_sn.controllers.online.actor_critic.RLRolloutState`.
 
     Attributes:
         runtime_state: Task-owned runtime state, threaded through the
-            injected :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`.
+            injected :class:`~ehp_sn.contracts.task_runtime.TaskRuntime`.
     """
 
     runtime_state: RuntimeStateT
@@ -91,16 +91,16 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
         - maintains per-slot buffers across steps via the inherited slot lifecycle
         - resets and refreshes halted slots via the injected :class:`TaskRuntime`
         - resets backbone state for halted slots
-        - samples actions from ``q_values`` via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`
+        - samples actions from ``q_values`` via :class:`~ehp_sn.policies.categorical.CategoricalPolicy`
         - delegates reward, termination, and observation dynamics to the injected
-          :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`
-        - emits one :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
+          :class:`~ehp_sn.contracts.task_runtime.TaskRuntime`
+        - emits one :class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
           per step
 
     Task-agnostic: the controller imports no task-specific types.  The only
     task surface is ``self._runtime`` typed as ``TaskRuntime[RuntimeStateT]``.
 
-    No TorchRL environment, no ``env_td``, no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`.
+    No TorchRL environment, no ``env_td``, no :class:`~ehp_sn.contracts.task_environment.TaskEnvironmentAdapter`.
     """
 
     def __init__(  # ----------------------------------------------------------
@@ -115,7 +115,7 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
             backbone: The value-control backbone (task-agnostic).
             config: Controller configuration.
             runtime: Task-owned runtime implementing :class:`TaskRuntime`.
-                Replaces the legacy :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`.
+                Replaces the legacy :class:`~ehp_sn.contracts.task_step.TaskStepEvaluator`.
         """
         super().__init__(backbone=cast(Any, backbone), config=config)
         self._policy = CategoricalPolicy(config.policy)
@@ -168,10 +168,10 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
             1. Refresh halted slots via :meth:`TaskRuntime.reset_slots`.
             2. Reset backbone state for halted rows.
             3. Run the backbone forward pass.
-            4. Sample an action via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`.
+            4. Sample an action via :class:`~ehp_sn.policies.categorical.CategoricalPolicy`.
             5. Call :meth:`TaskRuntime.step` for reward, termination, and next observation.
             6. Compute ``done`` as ``(terminated | truncated)``.
-            7. Emit :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`.
+            7. Emit :class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`.
 
         The controller interacts with the runtime at exactly two points:
         ``reset_slots`` (step 1) and ``step`` (step 5).  No task-specific

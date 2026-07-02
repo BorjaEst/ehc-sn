@@ -1,7 +1,7 @@
 """Halt-target construction policies for ACT deliberation.
 
 Each class in this module implements one policy for converting task evidence
-into a halt-target tensor consumed by :class:`~ehc_sn.objectives.control.halt.HaltClassificationObjective`.
+into a halt-target tensor consumed by :class:`~ehp_sn.objectives.control.halt.HaltClassificationObjective`.
 
 These are plain classes (not ``nn.Module``) — they own no parameters, buffers,
 or configurable submodules.

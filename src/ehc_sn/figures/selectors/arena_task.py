@@ -1,6 +1,6 @@
 """Selector for the ``task_overview_arena`` figure.
 
-Reads ``arena/*`` trace keys from a persisted eval artifact and produces a
+Reads ``arena/*`` trace keys from a persisted evaluation artifact and produces a
 typed data object for the overview template.  The data includes the
 environment layout (wall mask, observation map), the agent trajectory, and
 the revisit mask.
@@ -117,7 +117,7 @@ def select_arena_task_overview(
     trace: TraceTree,
     ctx: FigureContext,  # noqa: ARG001
 ) -> ArenaTaskOverviewData:
-    """Extract Arena task overview data from a persisted eval trace.
+    """Extract Arena task overview data from a persisted evaluation trace.
 
     Args:
         trace: Loaded ``TraceTree`` containing ``arena/*`` keys.
@@ -134,7 +134,7 @@ def select_arena_task_overview(
         if key not in trace.path_to_index:
             raise KeyError(
                 f"Arena task overview requires trace key {key!r}; "
-                f"the eval artifact does not contain it. "
+                f"the evaluation artifact does not contain it. "
                 f"Available keys: {sorted(trace.path_strs)}"
             )
 

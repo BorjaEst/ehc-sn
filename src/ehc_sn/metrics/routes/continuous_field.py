@@ -1,8 +1,8 @@
 """Routing tables for Continuous Field objectives (Goaltrace, Prospect).
 
 These routes map metric keys to dotted attribute paths on
-:class:`~ehc_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
-object produced by :class:`~ehc_sn.objectives.combine.ACTSupervisedScorer` (field modality).
+:class:`~ehp_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
+object produced by :class:`~ehp_sn.objectives.combine.ACTSupervisedScorer` (field modality).
 
 Route categories
 ----------------

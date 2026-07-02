@@ -13,11 +13,6 @@ Hierarchy (training):
     ├── trainer: TrainerConfig
     ├── checkpointing: CheckpointingConfig
     └── logging: LoggerSettings
-
-Hierarchy (evaluation):
-
-    SeqMazeHRMV2EvaluationExperimentConfig
-    └── model: SeqMazeHRMV2ModelConfig (same as above)
 """
 
 from __future__ import annotations
@@ -32,11 +27,9 @@ from ehc_sn.controllers.deliberation.q_halting import (
     DeliberationQHaltingControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
@@ -161,36 +154,20 @@ class SeqMazeHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
     )
 
 
-class SeqMazeHRMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for SeqMaze × HRM-v2."""
+class SeqMazeHRMV2EvaluationOptions(EvaluationOptions):
+    """Pair-specific evaluation options for SeqMaze × HRM-v2.
 
-    model: SeqMazeHRMV2ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: SeqMazeDeliberationConfig = Field(
-        default_factory=SeqMazeDeliberationConfig,
-        description="Deliberation execution policy (halt_action, episode_horizon).",
-    )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
-    )
+    Currently empty — all evaluation options inherited from recipe defaults.
+    """
+
+    pass
 
 
 # =============================================================================
 __all__ = [
     "SeqMazeDeliberationConfig",
     "SeqMazeHRMV2ComponentConfigs",
+    "SeqMazeHRMV2EvaluationOptions",
     "SeqMazeHRMV2ModelConfig",
     "SeqMazeHRMV2TrainingExperimentConfig",
-    "SeqMazeHRMV2EvaluationExperimentConfig",
 ]

@@ -7,7 +7,7 @@ This module owns:
 - :class:`RoutebindTraceSupplements` — canonical supplement content ready to attach.
 - :func:`build_routebind_trace_supplements` — constructs supplements from source context.
 - :func:`apply_routebind_trace_supplements` — attaches supplement data to a
-  :class:`~ehc_sn.traces.trace_tree.TraceTree`.
+  :class:`~ehp_sn.traces.trace_tree.TraceTree`.
 
 Supplements are populated from the evaluation batch (not from disk).
 Spatial topology tensors (cell_type, observation_id, start/goal flags) are

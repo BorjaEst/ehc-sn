@@ -70,7 +70,7 @@ class WorkingMemory:
 class ReasoningModule(nn.Module):
     """Base class for reasoning modules.
 
-    Wraps a :class:`~ehc_sn.modules.transformer.TransformerStack` and exposes a
+    Wraps a :class:`~ehp_sn.modules.transformer.TransformerStack` and exposes a
     persistent reset vector used to initialize and reset memory.
     """
 

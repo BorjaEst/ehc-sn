@@ -9,7 +9,7 @@ Public API
 ---------
 - :class:`MemoryProbeResult` — Pydantic schema for the probe output.
 - :func:`produce_tem_memory_probe` — run the probe against a loaded model and
-  eval batch.
+  evaluation batch.
 - :func:`persist_tem_memory_probe` — write the probe result to a JSON artifact.
 
 Usage::
@@ -381,7 +381,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     to evaluate memory health and self-retrieval quality.
 
     Args:
-        model: A TEM v1 model in evaluation mode (``model.eval()``).
+        model: A TEM v1 model in evaluation mode (``model.evaluation()``).
         input_batch: A single-step or multi-step ``TEMInputV1``.  When
             ``input_batch.seq_len > 1``, all steps are processed
             sequentially.
@@ -404,7 +404,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     if model.training:
         raise RuntimeError(
             "TEM memory probe requires the model in evaluation mode. "
-            "Call model.eval() before probing."
+            "Call model.evaluation() before probing."
         )
 
     n_freq = len(model._config.hpc.shape)

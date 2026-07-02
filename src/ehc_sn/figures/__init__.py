@@ -17,7 +17,6 @@ from ehc_sn.figures.register import register_builtin_figures
 from ehc_sn.figures.registry import (
     REGISTRY,
     FigureContext,
-    FigureInputContract,
     FigureSpec,
     _validate_figure_requirements,
 )
@@ -39,13 +38,13 @@ def _ensure_registered() -> None:
 def list_figures(
     *,
     surface: str | None = None,
-    input_contract: FigureInputContract | None = None,
+    input_contract: str | None = None,
 ) -> list[str]:
     """Return registered figure names, optionally filtered.
 
     Args:
         surface: Optional allowed-surface filter (e.g. ``"report"``).
-        input_contract: Optional input-contract filter.
+        input_contract: Optional input-contract filter (e.g. ``"trace"``).
 
     Returns:
         Sorted list of matching figure names.
@@ -65,14 +64,14 @@ def list_figure_specs(
     *,
     maturity: str | None = None,
     surface: str | None = None,
-    input_contract: FigureInputContract | None = None,
+    input_contract: str | None = None,
 ) -> list[FigureSpec]:
     """Return registered figure specs, optionally filtered.
 
     Args:
         maturity: Optional maturity filter (e.g. ``"stable"``).
         surface: Optional allowed-surface filter (e.g. ``"report"``).
-        input_contract: Optional input contract filter.
+        input_contract: Optional input contract filter (e.g. ``"trace"``).
 
     Returns:
         Sorted list of matching ``FigureSpec`` objects.
@@ -88,15 +87,16 @@ def list_figure_specs(
 # =============================================================================
 def render(
     name: str,
-    trace: TraceTree,
+    trace: TraceTree | None = None,
     ctx: FigureContext | None = None,
     *,
     temporal_semantics: dict[str, object] | None = None,
 ) -> mpl_figure.Figure:
     """Look up a registered figure by name and render it.
 
-    Validates that the trace satisfies the numeric and metadata key requirements
-    declared by the spec before plotting.  Built-in figures are auto-registered
+    For ``BOUNDED_TRACE`` figures, *trace* must be a valid ``TraceTree``.
+    For ``ARTIFACT`` figures, data is loaded from ``ctx.artifact_data``.
+    Built-in figures are auto-registered on first call.
     on first call.
 
     Args:
@@ -114,16 +114,26 @@ def render(
     if ctx is None:
         ctx = FigureContext()
     spec = REGISTRY.get(name)
-    _validate_figure_requirements(
-        trace, spec, temporal_semantics=temporal_semantics
-    )
+
+    # Skip trace validation for ARTIFACT figures — they consume artifact data.
+    from ehc_sn.figures.registry import ArtifactInputs
+
+    if not isinstance(spec.inputs, ArtifactInputs) and trace is not None:
+        _validate_figure_requirements(
+            trace, spec, temporal_semantics=temporal_semantics
+        )
+    elif isinstance(spec.inputs, ArtifactInputs) and ctx.artifact_data is None:
+        raise ValueError(
+            f"Figure '{name}' requires ARTIFACT input but "
+            f"ctx.artifact_data is None."
+        )
+
     return spec.plot(trace, ctx)
 
 
 # =============================================================================
 __all__ = [
     "FigureContext",
-    "FigureInputContract",
     "FigureSpec",
     "REGISTRY",
     "list_figure_specs",

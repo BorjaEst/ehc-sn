@@ -96,7 +96,7 @@ class ArenaEHCAdapterSettings(BaseModel, extra="forbid"):
 class ArenaEHCDiagnostics(DetachMixin):
     """EHP-family diagnostic surface for controller and objective consumption.
 
-    Satisfies :class:`~ehc_sn.objectives.ehp.EHCStepOutput` via computed
+    Satisfies :class:`~ehp_sn.objectives.ehp.EHCStepOutput` via computed
     properties that map bridge-native fields to the protocol's attribute names.
 
     Used by both EHP v1 and EHP v2 bridge adapters.
@@ -127,7 +127,7 @@ class ArenaEHCDiagnostics(DetachMixin):
 
     @property
     def latent_relations(self) -> dict[str, LatentRelation]:
-        """Named latent consistency relations expected by :class:`~ehc_sn.objectives.ehp.EHCObjective`."""
+        """Named latent consistency relations expected by :class:`~ehp_sn.objectives.ehp.EHCObjective`."""
         relations: dict[str, LatentRelation] = {
             GRID_TRANSITION_RELATION: LatentRelation(
                 lhs=self.grid_codes.post, rhs=self.grid_codes.prior
@@ -201,7 +201,7 @@ class ArenaTwoHotEncoder(nn.Module):
     """Encodes arena step data into a multiscale sensory code.
 
     Materialises the one-hot observation from the raw ``observation_id`` integer,
-    applies a :class:`~ehc_sn.modules.autoencoder.TwoHotEncoder`, and replicates
+    applies a :class:`~ehp_sn.modules.autoencoder.TwoHotEncoder`, and replicates
     the code once per HPC frequency band.  The resulting list is passed to the
     model-native input constructor in the versioned encoder subclass.
     """
@@ -313,11 +313,16 @@ def build_arena_observation_encoder(  # ---------------------------------------
             return ArenaTwoHotEncoder(observation_dim, feature_dim, n_freq)
         case "learned":
             return ArenaLearnedEncoder(
-                observation_dim, feature_dim, n_freq,
-                device=device, dtype=dtype,
+                observation_dim,
+                feature_dim,
+                n_freq,
+                device=device,
+                dtype=dtype,
             )
         case _:
-            raise ValueError(f"Unsupported arena encoder kind: {config.kind!r}.")
+            raise ValueError(
+                f"Unsupported arena encoder kind: {config.kind!r}."
+            )
 
 
 # =============================================================================

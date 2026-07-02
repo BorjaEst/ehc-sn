@@ -1,6 +1,6 @@
 """Cue-recall block-encoding diagnostic probe.
 
-Produces a WM-contract-conformant eval artifact from the trained HRM v1
+Produces a WM-contract-conformant evaluation artifact from the trained HRM v1
 checkpoint using **block encoding**: three 300-slot blocks each carrying
 one item prototype, with the cued block scaled at cue step.
 
@@ -20,16 +20,17 @@ Public API
 Usage::
 
     from ehc_sn.diagnostics.cue_recall_probe import persist_block_artifact
+    from ehc_sn.model_artifacts import ModelArtifact
     from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
-    import torch
 
-    config = ModelSettingsV1.from_config("config/models/hrm-v1-base.toml")
+    artifact = ModelArtifact.open(
+        Path("artifacts/models/hrm-v1-goaltrace/run-000001")
+    )
+    # read_model_config handles both assembly and legacy artifacts.
+    config = artifact.read_model_config(ModelSettingsV1)
     model = HRModelV1(config)
-    sd = torch.load("checkpoints/hrm-v1/eval-weights-only.pt",
-                    map_location="cpu", weights_only=False)
-    sd = sd.get("state_dict", sd) if isinstance(sd, dict) else sd
-    model.load_state_dict(sd, strict=False)
-    model.eval()
+    artifact.load_state_into(model)
+    model.evaluation()
 
     artifact_dir = persist_block_artifact(model, Path("/tmp/artifact"))
 """
@@ -41,8 +42,11 @@ from pathlib import Path
 import torch
 from torch import Tensor
 
-from ehc_sn.eval.artifacts import persist_regime_artifact_bundle
-from ehc_sn.eval.contracts import EvaluationCaseResult, EvaluationRegimeResult
+from ehc_sn.evaluation.artifacts import persist_regime_artifact_bundle
+from ehc_sn.evaluation.contracts import (
+    EvaluationCaseResult,
+    EvaluationRegimeResult,
+)
 from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1
 from ehc_sn.traces import TraceTree
 from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
@@ -166,7 +170,7 @@ def produce_cue_recall_block_artifact(
     [0,0,0,1,2,3].
 
     Args:
-        model: Loaded and weight-hydrated HRModelV1 in eval mode.
+        model: Loaded and weight-hydrated HRModelV1 in evaluation mode.
 
     Returns:
         TraceTree with 8 dense leaves, 6 time steps, batch size 1.
@@ -214,7 +218,7 @@ def persist_block_artifact(
     artifact directory path.
 
     Args:
-        model: Loaded and weight-hydrated HRModelV1 in eval mode.
+        model: Loaded and weight-hydrated HRModelV1 in evaluation mode.
         output_dir: Target directory for the artifact bundle.
         episode_label: Case identifier written into the manifest.
 

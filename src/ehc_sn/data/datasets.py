@@ -24,7 +24,7 @@ class DatasetMetadata(BaseModel, extra="allow"):
     """Dataset-level metadata for one resolved processed split root.
 
     This is typically read from a split-local metadata file and is less strict
-    than :class:`~ehc_sn.data.index.DatasetIndexEntry` (``extra=allow``).
+    than :class:`~ehp_sn.data.index.DatasetIndexEntry` (``extra=allow``).
     """
 
     source: str = Field(

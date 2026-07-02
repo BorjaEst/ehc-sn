@@ -25,11 +25,9 @@ from pydantic import BaseModel, Field
 from ehc_sn.adapters.hrm import RoutebindHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.act_supervised import (
@@ -120,35 +118,20 @@ class RoutebindHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
 
 
 # =============================================================================
-class RoutebindHRMV1EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for Routebind × HRM-v1."""
+class RoutebindHRMV1EvaluationOptions(EvaluationOptions):
+    """Pair-specific evaluation options for Routebind × HRM-v1."""
 
-    model: RoutebindHRMV1ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: Optional[HRMRuntimeConfig] = Field(
+    max_deliberation_steps: int | None = Field(
         default=None,
-        description="Execution policy for eval-time rollout bounds.",
-    )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
+        ge=1,
+        description="Maximum ACT deliberation steps.  None = recipe default.",
     )
 
 
 # =============================================================================
 __all__ = [
     "RoutebindHRMV1ComponentConfigs",
-    "RoutebindHRMV1EvaluationExperimentConfig",
+    "RoutebindHRMV1EvaluationOptions",
     "RoutebindHRMV1ModelConfig",
     "RoutebindHRMV1TrainingExperimentConfig",
 ]

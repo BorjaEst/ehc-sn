@@ -8,7 +8,7 @@ Sub-packages (organized by runtime concern):
 
 Related top-level modules:
 
-- :mod:`~ehc_sn.eval` — shared evaluation regime contracts and runner.
+- :mod:`~ehc_sn.evaluation` — shared evaluation regime contracts and runner.
 - :mod:`~ehc_sn.experiments` — explicit (task, family, version) compositions
   that wire concrete components into regime modules.
 - :mod:`~ehc_sn.training` — framework-agnostic training helpers.

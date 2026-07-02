@@ -2,7 +2,7 @@
 
 Owns typed extraction of probe and v1 dataclasses from generic batch mappings,
 and provides :class:`SeqMazeRuntime` — the
-:class:`~ehc_sn.contracts.task_runtime.TaskRuntime` implementation for
+:class:`~ehp_sn.contracts.task_runtime.TaskRuntime` implementation for
 actor-critic deliberation on static DAG problems.
 """
 
@@ -181,7 +181,7 @@ class _SeqMazeRuntimeState:
 # =============================================================================
 class SeqMazeRuntime(TaskRuntime["_SeqMazeRuntimeState"]):
     """SeqMaze implementation of
-    :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`.
+    :class:`~ehp_sn.contracts.task_runtime.TaskRuntime`.
 
     The SeqMaze problem is a static directed acyclic graph.  The observation
     (graph structure, start/goal flags) is fixed across deliberation steps.

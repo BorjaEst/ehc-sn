@@ -57,7 +57,7 @@ class TargetAdapterModule(nn.Module):
         self._target_adapter = TargetAdapterModule(self.adapter)
 
     Attributes:
-        target: The frozen backbone (``eval()``, ``requires_grad_(False)``).
+        target: The frozen backbone (``evaluation()``, ``requires_grad_(False)``).
     """
 
     def __init__(self, source: nn.Module) -> None:
@@ -70,7 +70,7 @@ class TargetAdapterModule(nn.Module):
         super().__init__()
         target = copy.deepcopy(source)
         target.requires_grad_(False)
-        target.eval()
+        target.evaluation()
         self.target = target
 
     @property

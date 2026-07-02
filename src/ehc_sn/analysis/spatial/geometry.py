@@ -8,6 +8,34 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+def _factorize_location_count(
+    n_locations: int,
+) -> tuple[int, int]:
+    """Factor a location count into ``(rows, cols)`` for grid reshape.
+
+    Prefers square grids; falls back to integer factorisation with the
+    smaller dimension as the first factor.
+
+    Args:
+        n_locations: Total number of location bins.
+
+    Returns:
+        ``(rows, cols)`` such that ``rows * cols == n_locations``.
+
+    Raises:
+        ValueError: If ``n_locations`` has no integer factorisation.
+    """
+    sqrt = int(np.sqrt(n_locations))
+    for r in range(sqrt, 0, -1):
+        if n_locations % r == 0:
+            return (r, n_locations // r)
+    raise ValueError(
+        f"n_locations={n_locations} cannot be factored into "
+        f"integer (rows, cols).  Grid reshape requires a "
+        f"rectangular topology."
+    )
+
+
 @dataclass(frozen=True)
 class SpatialBinGeometry:
     """Explicit spatial bin dimensions for one rate-map grid.
@@ -106,6 +134,52 @@ class SpatialBinGeometry:
         center_x = (w - 1) / 2.0
         bin_sz = self.square_bin_size()
         return float(min(center_y, center_x)) * bin_sz
+
+    # ── flat / grid reshape helpers ─────────────────────────────────────────
+
+    def flat_to_grid(self, arr: np.ndarray) -> np.ndarray:
+        """Reshape a flat-location array to a spatial grid.
+
+        The location axis (the axis at position ``-2 + ndim`` for
+        2-D+ arrays, or ``-1`` for 1-D arrays) is split into
+        ``(rows, cols)`` where ``rows * cols == L``.
+
+        Args:
+            arr: Array with a trailing location axis of length ``L``,
+                e.g. shape ``(E, L)`` or ``(E, L, U)``.
+
+        Returns:
+            Array with ``(E, rows, cols)`` or ``(E, rows, cols, U)``.
+
+        Raises:
+            ValueError: If ``L`` cannot be factored.
+        """
+        arr = np.asarray(arr)
+        loc_axis = arr.ndim - 1
+        n_locations = arr.shape[loc_axis]
+        rows, cols = _factorize_location_count(n_locations)
+        new_shape = arr.shape[:loc_axis] + (rows, cols) + arr.shape[loc_axis + 1:]
+        return arr.reshape(new_shape)
+
+    def grid_to_flat(self, arr: np.ndarray) -> np.ndarray:
+        """Inverse of ``flat_to_grid`` — merge ``(rows, cols)`` back to ``L``.
+
+        Args:
+            arr: Array with spatial axes preceding trailing dims,
+                e.g. shape ``(E, rows, cols)`` or ``(E, rows, cols, U)``.
+
+        Returns:
+            Array with merged location axis.
+        """
+        arr = np.asarray(arr)
+        grid_axis = arr.ndim - 2  # rows axis
+        n_rows, n_cols = arr.shape[grid_axis], arr.shape[grid_axis + 1]
+        new_shape = (
+            arr.shape[:grid_axis]
+            + (n_rows * n_cols,)
+            + arr.shape[grid_axis + 2:]
+        )
+        return arr.reshape(new_shape)
 
     # ── repr ────────────────────────────────────────────────────────────────
 

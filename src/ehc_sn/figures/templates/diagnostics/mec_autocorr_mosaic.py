@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +12,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from ehc_sn.figures.adapters.mec import load_mec_autocorr_mosaic_data
 from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
 from ehc_sn.figures.registry import FigureContext
@@ -18,13 +21,50 @@ from ehc_sn.figures.selectors.mec import (
     select_mec_autocorr_mosaic,
 )
 from ehc_sn.figures.utils.axes import subdivide_axes
-from ehc_sn.traces.trace_tree import TraceTree
+
+if TYPE_CHECKING:
+    from ehc_sn.evaluation.contracts import ProducedArtifact
+    from ehc_sn.traces.trace_tree import TraceTree
 
 
-def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    return MECAutocorrMosaicFigure(
-        select_mec_autocorr_mosaic(trace, ctx), ctx
-    ).plot()
+def plot(
+    trace: object = None,
+    *,
+    ctx: FigureContext | None = None,
+    artifact: ProducedArtifact | None = None,
+    artifact_root: Path | None = None,
+) -> Figure:
+    """Render the MEC autocorrelogram population mosaic.
+
+    Prefers artifact loading when ``artifact`` and ``artifact_root`` are
+    both provided.  Falls back to trace-based computation otherwise.
+
+    Args:
+        trace: Legacy trace tree.
+        ctx: Figure selection context.
+        artifact: Produced artifact from the MEC analysis runner.
+        artifact_root: Root directory containing the artifact.
+
+    Returns:
+        Matplotlib figure with the autocorrelogram mosaic layout.
+
+    Raises:
+        ValueError: If neither trace nor artifact is provided.
+    """
+    if ctx is None:
+        ctx = FigureContext()
+
+    if artifact is not None and artifact_root is not None:
+        data = load_mec_autocorr_mosaic_data(artifact, artifact_root)
+    elif trace is not None:
+        data = select_mec_autocorr_mosaic(trace, ctx)
+    else:
+        raise ValueError(
+            "mec_autocorr_mosaic requires either a trace or an "
+            "analysis artifact."
+        )
+
+    return MECAutocorrMosaicFigure(data, ctx).plot()
 
 
 @dataclass(frozen=True)

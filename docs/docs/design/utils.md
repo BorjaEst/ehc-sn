@@ -1,11 +1,32 @@
 # Utility Architecture
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
 > Canonical design for `ehp_sn.utils` — a small foundational package for
 > **domain-neutral, dependency-light technical primitives**.
 
 `ehp_sn.utils` contains low-level mechanisms that have no legitimate domain
 owner. It must not encode scientific or application policy, must import no
 other `ehp_sn` domain package, and must have no import-time side effects.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                  |
+| --------------------- | ---------------------------------------------------------------------- |
+| **Owns**              | Domain-neutral tensor validation, tree traversal, graph algorithms     |
+| **Must not own**      | Domain contracts; scientific computation; configuration; logging setup |
+| **Public API**        | `tensors`, `trees`, `graph` (submodules only — no flattened symbols)   |
+| **Allowed imports**   | stdlib, `numpy`, `torch`, `scipy` (narrow)                             |
+| **Forbidden imports** | Any `ehp_sn.*` domain package (including `contracts` and `types`)      |
+| **Layer**             | L0 — Foundation                                                        |
+| **Key invariant**     | `utils` is not a dumping ground; it owns no domain concepts            |
 
 ---
 
@@ -87,7 +108,7 @@ ehp_sn.utils       -> ehp_sn.evaluation
 ```
 
 The critical defect in the current codebase is: `utils/__init__.py` imports
-`from ehc_sn.types import LocationBelief, ...`, reversing the intended
+`from ehp_sn.types import LocationBelief, ...`, reversing the intended
 dependency. After migration, `types.py` (or the contract layer) imports from
 `utils`, never the reverse.
 
@@ -487,7 +508,7 @@ distinct sequences, no accidental mutation of unrelated generators.
 ## 7. Migration appendix — resolved destinations
 
 This appendix documents the final destination of every function currently in
-`ehc_sn/utils/`. Destinations marked "Remove" should not be migrated.
+`ehp_sn/utils/`. Destinations marked "Remove" should not be migrated.
 
 | Current function                                                                                                         | Final owner                                | Rationale                                            |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------------- |

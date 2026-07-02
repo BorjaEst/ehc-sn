@@ -45,20 +45,34 @@ nav:
   - Configuration:
       - Configuration: configuration.md
       - Environment Variables: environment-variables.md
-  - API:
-      - Overview: api/index.md
-      - Lightning Surface: api/lightning.md
-      - Data API: api/data.md
-      - Training API: api/training.md
-      - Evaluation API: api/eval.md
-      - Model Families: api/model-families.md
-      - Reference (Docstrings): api/reference.md
+  - CLI:
+      - Overview: cli/index.md
+      - Data Generation: cli/data.md
+      - Tasks Generation: cli/tasks.md
+      - Train Models: cli/train.md
+      - Evaluate Models: cli/evaluate.md
+      - Report Generation: cli/report.md
   - Developers:
       - Development: development.md
       - Specs And Governance: specs-and-governance.md
       - Legacy Context: legacy-context.md
   - Theory:
-      - EHP Theory Foundations: ehc-theory-foundations.md
+  - Design:
+      - Index: design/_index.md
+      - Contracts: design/contracts.md
+      - Data: design/data.md
+      - Analysis: design/analysis.md
+      - Adapters: design/adapters.md
+      - Controllers: design/controllers.md
+      - Logging: design/logging.md
+      - Loss: design/loss.md
+      - Metrics: design/metrics.md
+      - Objectives: design/objectives.md
+      - Rollouts: design/rollouts.md
+      - Training: design/training.md
+      - Traces: design/traces.md
+      - Utilities: design/utils.md
+      - EHP Theory Foundations: ehp-theory-foundations.md
       - Memory-Mediated Reasoning: memory-mediated-reasoning.md
       - Notation Map: notation-map.md
       - PFC Working Memory Theory: pfc-working-memory-theory.md

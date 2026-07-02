@@ -13,17 +13,9 @@ Hierarchy (training):
     │   └── runtime
     ├── data: DatamoduleConfig
     ├── trainer: TrainerSettings
-    ├── checkpointing: CheckpointSettings
+    ├── checkpointing: CheckpointingConfig
     └── logging: LoggerSettings
 
-Hierarchy (evaluation):
-
-    MazeHardHRMV1EvaluationExperimentConfig
-    ├── model: MazeHardHRMV1ModelConfig (same as above)
-    ├── checkpoint: EvaluationCheckpointConfig
-    ├── dataset: EvaluationDatasetConfig
-    ├── evaluation: EvaluationConfig
-    └── output: EvaluationOutputConfig
 """
 
 from __future__ import annotations
@@ -36,11 +28,9 @@ from pydantic import BaseModel, Field
 from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.act_supervised import (
@@ -151,35 +141,20 @@ class MazeHardHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
     )
 
 
-class MazeHardHRMV1EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for MazeHard × HRM-v1."""
+class MazeHardHRMV1EvaluationOptions(EvaluationOptions):
+    """Pair-specific evaluation options for MazeHard × HRM-v1."""
 
-    model: MazeHardHRMV1ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: Optional[HRMRuntimeConfig] = Field(
+    max_deliberation_steps: int | None = Field(
         default=None,
-        description="Execution policy for eval-time rollout bounds.",
-    )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
+        ge=1,
+        description="Maximum ACT deliberation steps.  None = recipe default.",
     )
 
 
 # =============================================================================
 __all__ = [
     "MazeHardHRMV1ComponentConfigs",
+    "MazeHardHRMV1EvaluationOptions",
     "MazeHardHRMV1ModelConfig",
     "MazeHardHRMV1TrainingExperimentConfig",
-    "MazeHardHRMV1EvaluationExperimentConfig",
 ]

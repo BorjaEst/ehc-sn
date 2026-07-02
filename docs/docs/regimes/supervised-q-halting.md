@@ -238,11 +238,11 @@ but not used to reduce evaluation compute.
 
 | Component            | Location                                  |
 | -------------------- | ----------------------------------------- |
-| Controller           | `ehc_sn.controllers.deliberation.act`     |
-| Objective            | `ehc_sn.objectives.composites.act`        |
-| Lightning module     | `ehc_sn.lightning.modules.act_supervised` |
-| Halting control loss | `ehc_sn.objectives.control.halt`          |
-| Rollout runner       | `ehc_sn.rollouts.runtime`                 |
+| Controller           | `ehp_sn.controllers.deliberation.act`     |
+| Objective            | `ehp_sn.objectives.composites.act`        |
+| Lightning module     | `ehp_sn.lightning.modules.act_supervised` |
+| Halting control loss | `ehp_sn.objectives.control.halt`          |
+| Rollout runner       | `ehp_sn.rollouts.runtime`                 |
 
 ## Failure modes
 

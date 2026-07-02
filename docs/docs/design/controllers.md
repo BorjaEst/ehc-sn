@@ -1,7 +1,28 @@
 # Controller Architecture
 
-> Canonical design for `ehc_sn.controllers` — one-step, task-agnostic control
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
+> Canonical design for `ehp_sn.controllers` — one-step, task-agnostic control
 > transitions over recurrent model execution.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | One-step control transitions; halt/continue/action decisions; slot-lifecycle management; controller-family outputs         |
+| **Must not own**      | Model architecture; task semantics; loss computation; rollout iteration; optimizer steps                                   |
+| **Public API**        | `StepController` protocol, `ACTController`, `DeliberationQHaltingController`, `RLController`, `ReplayTrajectoryController` |
+| **Allowed imports**   | `adapters` (BridgeOutput), `contracts`, `types`, `policies`, `utils`                                                       |
+| **Forbidden imports** | `models` (direct), `tasks` (direct), `training`, `lightning`, `evaluation`, `objectives`                                   |
+| **Layer**             | L2 — Computation                                                                                                           |
+| **Key invariant**     | Controller delegates model invocation to the adapter; it never calls `model(input, state)` directly                        |
 
 ## 1. Architectural definition
 
@@ -20,6 +41,32 @@ where:
 | \(\Omega\)   | Explicit execution context                                            | Per-family typed context (e.g. `DeliberationContext`) |
 | \(O_n\)      | Typed controller-family output                                        | `QHaltingInteractionRecord`, `ReplayStepOutput`, etc. |
 | \(C\_{n+1}\) | Next controller carry                                                 | Same type as \(C_n\)                                  |
+
+### Canonical invocation position
+
+The controller sits between the rollout runner and the adapter:
+
+```
+rollout runner
+    → controller.step(carry, batch, context)
+        → adapter(model, task_input, state)
+            → model(input, state) → output, next_state
+        → adapter.postprocess(output) → bridge_output
+        → control decision (halt/continue/action) from bridge_output
+    → (carry, controller_output)
+```
+
+| Concern                                            | Owner         |
+| -------------------------------------------------- | ------------- |
+| Repeated temporal iteration and stop decisions     | `rollouts`    |
+| One-step control transition and decision semantics | `controllers` |
+| Task-to-model translation and physical model call  | `adapters`    |
+| Neural computation                                 | `models`      |
+
+The controller **delegates model invocation to the adapter**. It receives
+a bridge output and applies control decisions (halt/continue, action
+selection, cursor advancement). It must not import task-specific types
+or understand model input/output conventions directly.
 
 The outer **runner** owns repeated invocation:
 
@@ -122,7 +169,7 @@ slot admission/reset  →  backbone transition  →  control decision  →  next
 | Losses and optimization                | `ehp_sn.objectives`, `ehp_sn.training`, `ehp_sn.lightning`         |
 | Concrete task semantics                | Protocols in `ehp_sn.contracts`; implementations in `ehp_sn.tasks` |
 | Dataset loading and data iteration     | Data modules, rollout sources                                      |
-| Artifact persistence and visualization | `ehp_sn.traces`, `ehp_sn.eval`, analysis, figures                  |
+| Artifact persistence and visualization | `ehp_sn.traces`, `ehp_sn.evaluation`, analysis, figures            |
 | Experiment-level construction          | Experiment scripts, Lightning modules                              |
 
 A controller may produce policy logits, values, halt probabilities, rewards, or
@@ -442,8 +489,8 @@ Each submodule re-exports its stable surface:
 
 ```python
 # deliberation/__init__.py
-from ehc_sn.controllers.deliberation.act import ACTController, ACTControllerConfig
-from ehc_sn.controllers.deliberation.q_halting import (
+from ehp_sn.controllers.deliberation.act import ACTController, ACTControllerConfig
+from ehp_sn.controllers.deliberation.q_halting import (
     DeliberationQHaltingController,
     DeliberationQHaltingControllerConfig,
 )
@@ -595,7 +642,7 @@ ehp_sn.rollouts                     ← RecurrentRunner, StepRecord, sources
     ↑
 ehp_sn.objectives / ehp_sn.training  ← loss construction, bootstrap targets
     ↑
-ehp_sn.lightning / ehp_sn.eval       ← training loops, evaluation
+ehp_sn.lightning / ehp_sn.evaluation       ← training loops, evaluation
 ```
 
 **Rule:** `ehp_sn.contracts` must not import from `ehp_sn.controllers`.
@@ -620,21 +667,21 @@ The package root exposes the stable controller classes and the structural
 protocol that callers need for typing:
 
 ```python
-from ehc_sn.controllers import (
+from ehp_sn.controllers import (
     StepController,
 )
 
-from ehc_sn.controllers.deliberation import (
+from ehp_sn.controllers.deliberation import (
     ACTController,
     ACTControllerConfig,
     DeliberationQHaltingController,
     DeliberationQHaltingControllerConfig,
 )
-from ehc_sn.controllers.online import (
+from ehp_sn.controllers.online import (
     RLController,
     RLControllerConfig,
 )
-from ehc_sn.controllers.replay import (
+from ehp_sn.controllers.replay import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
 )
@@ -660,13 +707,13 @@ Do not root-export:
 
 | Not exported              | Import from                           | Reason                                        |
 | ------------------------- | ------------------------------------- | --------------------------------------------- |
-| `BaseController`          | `ehc_sn.controllers._base`            | Implementation infrastructure, not a contract |
-| `RolloutState`            | `ehc_sn.controllers.state`            | Carry type; advanced callers only             |
-| `build_controller`        | `ehc_sn.controllers.factory`          | Experimental; explicit constructors preferred |
-| Every interaction record  | `ehc_sn.controllers.records`          | Consumed by objectives, not by callers        |
-| Every concrete carry type | `ehc_sn.controllers.state`            | Advanced callers import from defining module  |
-| Policy utility classes    | `ehc_sn.controllers.policies`         | Internal algorithmic components               |
-| Internal masking helpers  | `ehc_sn.controllers.deliberation.act` | Implementation detail                         |
+| `BaseController`          | `ehp_sn.controllers._base`            | Implementation infrastructure, not a contract |
+| `RolloutState`            | `ehp_sn.controllers.state`            | Carry type; advanced callers only             |
+| `build_controller`        | `ehp_sn.controllers.factory`          | Experimental; explicit constructors preferred |
+| Every interaction record  | `ehp_sn.controllers.records`          | Consumed by objectives, not by callers        |
+| Every concrete carry type | `ehp_sn.controllers.state`            | Advanced callers import from defining module  |
+| Policy utility classes    | `ehp_sn.controllers.policies`         | Internal algorithmic components               |
+| Internal masking helpers  | `ehp_sn.controllers.deliberation.act` | Implementation detail                         |
 | Backbone output protocols | Model/binding layer                   | Not controller-owned                          |
 
 ---

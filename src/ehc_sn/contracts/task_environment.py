@@ -6,7 +6,7 @@ when a task exposes an interactive environment whose observations, rewards,
 and termination arise from stepping external state.
 
 Fixed-instance reasoning tasks should usually implement
-:class:`~ehc_sn.contracts.task_step.TaskStepEvaluator` instead.
+:class:`~ehp_sn.contracts.task_step.TaskStepEvaluator` instead.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class TaskEnvironmentAdapter(Protocol):
 
     Implement this when a task exposes an interactive environment.  Fixed-
     instance reasoning tasks should usually implement
-    :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator` instead.
+    :class:`~ehp_sn.contracts.task_step.TaskStepEvaluator` instead.
     """
 
     def build_reset_td(self, batch: Batch) -> TensorDictBase:

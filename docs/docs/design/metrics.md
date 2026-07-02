@@ -5,15 +5,68 @@ description: Domain kernel for ehp-sn metrics — mathematical measurement, accu
 
 # Metrics Design Contract (`ehp_sn.metrics`)
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > **Canonical architecture name:** `ehp_sn`. **Current Python namespace
 > during migration:** `ehc_sn`. This document uses the canonical name
 > throughout. All import examples should be read as `from ehp_sn`; the
 > implementation package is `ehc_sn` until the rename is complete.
 >
 > The metrics module owns the **mathematical definition and accumulation
-> semantics** of every measurement in the EHP project. It answers exactly
+> semantics** of every measurement in the EHP project.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owns**              | Metric formulas; sufficient statistics (`update`/`compute`/`reset`); denominator and masking semantics; distributed reduction; `RatioStat` |
+| **Must not own**      | Metric selection for evaluations; recipe orchestration; observation feeding; result assembly; training loops                               |
+| **Public API**        | Stateful `Metric` subclasses (`ExactSequenceMatch`, `MaskedCategoricalAccuracy`, `HaltRate`, …); `functional/` variants                    |
+| **Allowed imports**   | `contracts`, `types`, `torch`                                                                                                              |
+| **Forbidden imports** | `evaluation`, `training`, `lightning`, `objectives`, `models`, `tasks`                                                                     |
+| **Layer**             | L1 — Domain Primitives                                                                                                                     |
+| **API verified**      | 🔴 Known gap: documented API differs from actual `__init__.py` exports                                                                     |
+
+### Transitional API note
+
+The documented public API (`ExactSequenceMatch`, `MaskedCategoricalAccuracy`,
+`HaltRate`, `MeanDeliberationSteps`, etc.) describes the target metric
+catalog. The current `__init__.py` exports (`Route`, `RatioMetric`,
+`HiddenNormHistogram`, `OccupancyHistogram`, `build_train_metrics`,
+`build_val_metrics`) reflect an earlier integration-focused API. Migration
+plan:
+
+1. Implement stateful `Metric` subclasses matching the documented API.
+2. Add `functional/` variants for each.
+3. Deprecate `Route`-based metric selection in favor of direct metric
+   construction.
+4. Update `__init__.py` exports to match the documented surface.
+
+--- It answers exactly
+
 > one question: given predictions, targets, masks, and task-specific
 > observations, what quantitative value should be computed and returned?
+
+### Metrics vs evaluation: who aggregates what
+
+| Concern                                                            | Owner        |
+| ------------------------------------------------------------------ | ------------ |
+| Metric formulas, sufficient statistics, `update`/`compute`/`reset` | `metrics`    |
+| Denominator and masking semantics                                  | `metrics`    |
+| Distributed sufficient-statistic reduction                         | `metrics`    |
+| Choosing which metrics to run on which evaluation                  | `evaluation` |
+| Feeding observations into metric instances                         | `evaluation` |
+| Coordinating case-level and suite-level execution                  | `evaluation` |
+| Placing computed values into `EvaluationResult`                    | `evaluation` |
+
+**Metrics owns aggregation algorithms. Evaluation owns aggregation orchestration.**
 
 It does **not** own evaluation workflows, experiment recipes, report
 generation, plotting, checkpoint selection, or MLflow logging. Those
@@ -37,7 +90,7 @@ flowchart LR
     subgraph Producers["Metric producers"]
         OBJ["objectives/"]
         TASK["tasks/"]
-        EVAL["ehp_sn.evaluation"]
+        evaluation["ehp_sn.evaluation"]
     end
 
     subgraph Metrics["ehp_sn.metrics"]
@@ -679,7 +732,7 @@ field_mae
 field_mse
 ```
 
-Logging namespaces (e.g., `val/sequences_exact`, `eval/`) are added
+Logging namespaces (e.g., `val/sequences_exact`, `evaluation/`) are added
 externally by the logging or Lightning layer — they are not part of
 the canonical metric identity. This separates metric identity from
 logging scope.
@@ -849,7 +902,7 @@ A metric computes a value:
 A logger publishes it:
 
 ```python
-mlflow.log_metric("eval/sequences_exact", 0.73)
+mlflow.log_metric("evaluation/sequences_exact", 0.73)
 ```
 
 **A metric must never call a logger or tracking API.** This rule is a

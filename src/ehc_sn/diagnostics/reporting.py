@@ -21,7 +21,7 @@ import numpy as np
 from ehc_sn.diagnostics.hrm_dynamics import (
     compute_hrm_dynamics_metrics_from_trace,
 )
-from ehc_sn.eval.artifacts import load_artifact_run_cases
+from ehc_sn.evaluation.artifacts import load_artifact_run_cases
 from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
 
 # ---------------------------------------------------------------------------
@@ -32,13 +32,13 @@ from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
 def compute_hrm_dynamics_report_rows(
     artifact_dir: str | Path,
 ) -> list[dict[str, Any]]:
-    """Load an eval artifact and compute aggregated HRM dynamics metrics.
+    """Load an evaluation artifact and compute aggregated HRM dynamics metrics.
 
     Loads all case traces from *artifact_dir*, computes
     ``hrm_dynamics_metrics`` per case, and aggregates results across cases.
 
     Args:
-        artifact_dir: Path to a persisted eval artifact directory
+        artifact_dir: Path to a persisted evaluation artifact directory
             containing ``manifest.json`` and case traces.
 
     Returns:

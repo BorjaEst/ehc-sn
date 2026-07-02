@@ -2,7 +2,7 @@
 
 These classes are specific to the TEM (Tolman-Eichenbaum Machine) architecture
 and are **not** part of the generic metrics public API exported by
-:mod:`ehc_sn.metrics`.  TEM code should import directly from this module:
+:mod:`ehp_sn.metrics`.  TEM code should import directly from this module:
 
     from ehc_sn.metrics.metrics import AccuracyO
 
@@ -43,7 +43,9 @@ class AccuracyO:
     _total: Tensor | None = None  # weight for averaging (internal)
 
     @classmethod
-    def zero(cls, *, device: Device | str, dtype: torch.dtype = torch.float32) -> "AccuracyO":
+    def zero(
+        cls, *, device: Device | str, dtype: torch.dtype = torch.float32
+    ) -> "AccuracyO":
         """Create a zero-initialized accuracy.
 
         Args:
@@ -54,13 +56,20 @@ class AccuracyO:
             Zero-initialized :class:`AccuracyO`.
         """
         z = torch.zeros((), device=device, dtype=dtype)
-        return cls(acc_p_inf=z.clone(), acc_gen_gi=z.clone(), acc_gen_gg=z.clone(), _total=z.clone())
+        return cls(
+            acc_p_inf=z.clone(),
+            acc_gen_gi=z.clone(),
+            acc_gen_gg=z.clone(),
+            _total=z.clone(),
+        )
 
     def __post_init__(self):
         """Set default _total to 1 if not provided."""
         if self._total is None:
             # Use device and dtype from first accuracy tensor
-            self._total = torch.ones((), device=self.acc_p_inf.device, dtype=self.acc_p_inf.dtype)
+            self._total = torch.ones(
+                (), device=self.acc_p_inf.device, dtype=self.acc_p_inf.dtype
+            )
 
     def __add__(self, other: "AccuracyO") -> "AccuracyO":
         """Add two accuracies with weighted averaging.
@@ -79,9 +88,18 @@ class AccuracyO:
         denom = torch.clamp(total_new, min=1.0)
         # Weighted average: (a1*w1 + a2*w2) / (w1 + w2)
         return AccuracyO(
-            acc_p_inf=(self.acc_p_inf * self._total + other.acc_p_inf * other._total) / denom,
-            acc_gen_gi=(self.acc_gen_gi * self._total + other.acc_gen_gi * other._total) / denom,
-            acc_gen_gg=(self.acc_gen_gg * self._total + other.acc_gen_gg * other._total) / denom,
+            acc_p_inf=(
+                self.acc_p_inf * self._total + other.acc_p_inf * other._total
+            )
+            / denom,
+            acc_gen_gi=(
+                self.acc_gen_gi * self._total + other.acc_gen_gi * other._total
+            )
+            / denom,
+            acc_gen_gg=(
+                self.acc_gen_gg * self._total + other.acc_gen_gg * other._total
+            )
+            / denom,
             _total=total_new,
         )
 
@@ -94,5 +112,9 @@ class AccuracyO:
         Returns:
             New :class:`AccuracyO` with scaled internal weight.
         """
-        return AccuracyO(self.acc_p_inf, self.acc_gen_gi, self.acc_gen_gg, _total=self._total / divisor)
-
+        return AccuracyO(
+            self.acc_p_inf,
+            self.acc_gen_gi,
+            self.acc_gen_gg,
+            _total=self._total / divisor,
+        )

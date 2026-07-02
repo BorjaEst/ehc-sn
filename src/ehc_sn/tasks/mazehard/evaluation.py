@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from ehc_sn.metrics.spec import MetricSpec
+from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
 
 from .contracts import (
     MAZE_HARD_IGNORE_LABEL_ID,
@@ -52,6 +52,14 @@ MAZEHARD_METRIC_SPECS: list[MetricSpec] = [
         "(stricter than token-accuracy; used by mazehard-delib track).",
     ),
 ]
+
+_MAZEHARD_METRICS_MAP = {spec.name: spec for spec in MAZEHARD_METRIC_SPECS}
+
+MAZEHARD_SCORING_SPEC: TaskScoringSpec = TaskScoringSpec(
+    task_name="mazehard",
+    metrics=_MAZEHARD_METRICS_MAP,
+    default_score="token_accuracy",
+)
 
 
 # =============================================================================
@@ -190,6 +198,8 @@ def build_maze_hard_score_report(  # ------------------------------------------
 
 # =============================================================================
 __all__ = [
+    "MAZEHARD_METRIC_SPECS",
+    "MAZEHARD_SCORING_SPEC",
     "MazeHardScoreReport",
     "MazeHardStepScore",
     "build_maze_hard_score_report",

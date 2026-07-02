@@ -1868,7 +1868,7 @@ def build_routebind_task_corpus(
             extent=[storage_height, storage_width],
             n_samples=final_counts,
             source_id=f"synthetic/{topology_family}",
-            builder="ehc_sn.tasks.routebind.builder.build_routebind_task_corpus",
+            builder="ehp_sn.tasks.routebind.builder.build_routebind_task_corpus",
             seed=seed,
             stage_params=stage_params,
             task=TASK_FAMILY,

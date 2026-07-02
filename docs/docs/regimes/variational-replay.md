@@ -211,13 +211,13 @@ maintains consistent latent codes.
 
 | Component        | Location                                      |
 | ---------------- | --------------------------------------------- |
-| Controller       | `ehc_sn.controllers.replay.trajectory`        |
-| Objective        | `ehc_sn.objectives.composites.tem`            |
-| Lightning module | `ehc_sn.lightning.modules.variational_replay` |
-| Rollout runner   | `ehc_sn.rollouts.runtime`                     |
-| Consistency loss | `ehc_sn.loss.consistency`                     |
-| Cross-entropy    | `ehc_sn.loss.cross_entropy`                   |
-| Regularization   | `ehc_sn.loss.regularization`                  |
+| Controller       | `ehp_sn.controllers.replay.trajectory`        |
+| Objective        | `ehp_sn.objectives.composites.tem`            |
+| Lightning module | `ehp_sn.lightning.modules.variational_replay` |
+| Rollout runner   | `ehp_sn.rollouts.runtime`                     |
+| Consistency loss | `ehp_sn.loss.consistency`                     |
+| Cross-entropy    | `ehp_sn.loss.cross_entropy`                   |
+| Regularization   | `ehp_sn.loss.regularization`                  |
 
 ## Relationship to supervised Q-halting
 

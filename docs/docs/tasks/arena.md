@@ -6,7 +6,7 @@
 | ------------- | -------------------------------------------------------- |
 | Task name     | `arena`                                                  |
 | Benchmark     | structural representation / structural-navigation replay |
-| Package path  | `src/ehc_sn/tasks/arena/`                                |
+| Package path  | `src/ehp_sn/tasks/arena/`                                |
 | CLI script    | `scripts/data-gen/build-arena.py`                        |
 | Output path   | `data/processed/arena/<corpus>/v<version>/`              |
 | Dataset class | `task_corpus`                                            |

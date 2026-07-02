@@ -2,7 +2,6 @@
 
 from .config import (
     MazeHardHRMV1ComponentConfigs,
-    MazeHardHRMV1EvaluationExperimentConfig,
     MazeHardHRMV1ModelConfig,
     MazeHardHRMV1TrainingExperimentConfig,
 )
@@ -14,7 +13,6 @@ __all__ = [
     "MazeHardHRMV1ComponentConfigs",
     "MazeHardHRMV1ModelConfig",
     "MazeHardHRMV1TrainingExperimentConfig",
-    "MazeHardHRMV1EvaluationExperimentConfig",
     "build_mazehard_hrm_v1_model",
     "build_mazehard_hrm_v1_training_experiment",
     "build_mazehard_hrm_v1_evaluation_experiment",

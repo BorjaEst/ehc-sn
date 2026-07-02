@@ -1,49 +1,73 @@
-"""Central registry mapping task families to their canonical primary metric.
+"""Central registry of ``TaskScoringSpec`` instances for all known task families.
 
-This module is the single access point for ``eval/`` and ``reporting/`` to
-determine which metric is the headline benchmark score for a task.
+Task modules own their ``*_SCORING_SPEC`` constant in ``evaluation.py``.
+This module aggregates them in one place for cross-module discovery.
 
-Task modules define their own ``*_PRIMARY_METRIC_NAME`` constants in
-``evaluation.py``.  This registry aggregates them in one place to avoid
-fragmented lookups across the codebase.
+There is no independent primary-metric mapping here — every metric name
+comes from a canonical task-owned ``TaskScoringSpec``.
 """
 
 from __future__ import annotations
 
-from ehc_sn.tasks.arena.evaluation import ARENA_PRIMARY_METRIC_NAME
-from ehc_sn.tasks.mazehard.evaluation import MAZEHARD_PRIMARY_METRIC_NAME
+from ehc_sn.metrics.spec import TaskScoringSpec
+from ehc_sn.tasks.arena.evaluation import ARENA_SCORING_SPEC
+from ehc_sn.tasks.goaltrace.evaluation import GOALTRACE_SCORING_SPEC
+from ehc_sn.tasks.mazehard.evaluation import MAZEHARD_SCORING_SPEC
+from ehc_sn.tasks.routebind.evaluation import ROUTEBIND_SCORING_SPEC
+from ehc_sn.tasks.seqmaze.evaluation import SEQMAZE_V1_SCORING_SPEC
 
-PRIMARY_METRIC_BY_TASK: dict[str, str] = {
-    "arena": ARENA_PRIMARY_METRIC_NAME,
-    "mazehard": MAZEHARD_PRIMARY_METRIC_NAME,
+TASK_SCORING_SPECS: dict[str, TaskScoringSpec] = {
+    spec.task_name: spec
+    for spec in [
+        ARENA_SCORING_SPEC,
+        GOALTRACE_SCORING_SPEC,
+        MAZEHARD_SCORING_SPEC,
+        ROUTEBIND_SCORING_SPEC,
+        SEQMAZE_V1_SCORING_SPEC,
+    ]
 }
-"""Mapping from task-family name to its canonical primary benchmark metric.
+"""Mapping from task-family name to its ``TaskScoringSpec``.
 
-Only tasks that have an implemented evaluation surface and a defined primary
-metric appear here.  Unimplemented tasks (e.g. ``cue_recall``) are absent.
+This is the single aggregation point.  Each task family's evaluation module
+owns its spec; this dict collects them for discovery.
 """
 
 
-def primary_metric_name_for_task(task_name: str) -> str | None:
-    """Return the canonical primary metric name for *task_name*, or ``None``.
+def scoring_spec_for_task(task_name: str) -> TaskScoringSpec:
+    """Return the ``TaskScoringSpec`` for *task_name*, or raise ``KeyError``.
 
     Args:
         task_name: Canonical task-family identifier (e.g. ``"mazehard"``).
 
     Returns:
-        The primary metric string (e.g. ``"token_accuracy"``) or ``None`` if
-        the task is recognised but has no defined primary metric.
+        The task's ``TaskScoringSpec``.
 
     Raises:
-        ValueError: If *task_name* is not in ``KNOWN_TASKS``.
+        KeyError: If *task_name* is not a known task with a registered spec.
     """
-    if task_name not in KNOWN_TASKS:
-        known = ", ".join(sorted(KNOWN_TASKS))
-        raise ValueError(f"Unknown task {task_name!r}. Known tasks: {known}.")
-    return PRIMARY_METRIC_BY_TASK.get(task_name)
+    try:
+        return TASK_SCORING_SPECS[task_name]
+    except KeyError:
+        known = ", ".join(sorted(TASK_SCORING_SPECS))
+        raise KeyError(
+            f"Unknown task {task_name!r}. Known tasks: {known}."
+        ) from None
+
+
+def primary_metric_name_for_task(task_name: str) -> str | None:
+    """Return the default primary metric name for *task_name*, or ``None``.
+
+    Delegates to the task's ``TaskScoringSpec.default_score``.  Returns
+    ``None`` for unknown tasks rather than raising.
+    """
+    spec = TASK_SCORING_SPECS.get(task_name)
+    if spec is None:
+        return None
+    return spec.default_score
 
 
 __all__ = [
-    "PRIMARY_METRIC_BY_TASK",
+    "TASK_SCORING_SPECS",
     "primary_metric_name_for_task",
+    "scoring_spec_for_task",
 ]

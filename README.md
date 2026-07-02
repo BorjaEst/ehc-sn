@@ -14,7 +14,7 @@ ehp-sn is a research library for biologically inspired spatial cognition and
 navigation models built on PyTorch.
 
 The codebase supports multiple model families, tasks, and adapters under a
-single canonical namespace: ehc_sn.
+single canonical namespace: ehp_sn.
 
 ## Architecture
 
@@ -30,15 +30,15 @@ single canonical namespace: ehc_sn.
 
 ### Models
 
-| Family  | Versions | Brain region           | Computation style                                                               | Training mode         |
-| ------- | -------- | ---------------------- | ------------------------------------------------------------------------------- | --------------------- |
-| **TEM** | v1, v2   | LEC ↔ MEC ↔ HPC        | Predictive cognitive map; grid transitions, attractor retrieval, Hebbian memory | Replay                |
-| **HRM** | v1, v2   | PFC                    | Hierarchical recurrent ACT (Adaptive Computation Time); Q-learning halting      | Deliberation          |
-| **EHP** | v1, v2   | Unified EC ↔ HPC ↔ PFC | Subsumes TEM patterns; supports spatial replay and reasoning deliberation       | Replay & deliberation |
+| Family  | Versions | Brain region           | Computation style                                                                                      | Training mode         |
+| ------- | -------- | ---------------------- | ------------------------------------------------------------------------------------------------------ | --------------------- |
+| **TEM** | v1, v2   | LEC ↔ MEC ↔ HPC        | Predictive cognitive map; grid transitions, attractor retrieval, Hebbian memory                        | Replay                |
+| **HRM** | v1, v2   | PFC                    | Hierarchical recurrent ACT (Adaptive Computation Time); actor-critic deliberation with Q-value halting | Deliberation          |
+| **EHP** | v1, v2   | Unified EC ↔ HPC ↔ PFC | Subsumes TEM patterns; supports spatial replay and reasoning deliberation                              | Replay & deliberation |
 
 ### Tasks
 
-| Task          | Execution mode                | Eval surface                                             | Readiness  |
+| Task          | Execution mode                | evaluation surface                                       | Readiness  |
 | ------------- | ----------------------------- | -------------------------------------------------------- | ---------- |
 | **Arena**     | Replay (structural exposure)  | `ArenaScoreReport` — accuracy_all, accuracy_revisit      | Production |
 | **MazeHard**  | Deliberation (puzzle batches) | `MazeHardScoreReport` — sequences_exact, tokens_accuracy | Production |
@@ -218,7 +218,7 @@ pip install -e .
 ### Verify installation
 
 ```bash
-python -c "import ehc_sn; print('ehc_sn import OK')"
+python -c "import ehp_sn; print('ehp_sn import OK')"
 ```
 
 ## Quick Start

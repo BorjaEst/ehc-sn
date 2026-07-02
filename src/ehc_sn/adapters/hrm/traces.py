@@ -57,7 +57,6 @@ from ehc_sn.traces.keys import (  # fmt: skip
 from ehc_sn.traces.observer import StepContext
 from ehc_sn.types import Batch
 
-
 # =============================================================================
 # Getter function
 # =============================================================================

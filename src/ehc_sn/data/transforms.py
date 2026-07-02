@@ -36,7 +36,7 @@ class Compose:
 
     Note:
         Task-specific transforms (such as grid-projection or action encoding)
-        live outside :mod:`ehc_sn.data.transforms` in their respective task
+        live outside :mod:`ehp_sn.data.transforms` in their respective task
         adapter packages.
     """
 
@@ -86,7 +86,7 @@ class RandomDihedral:
             a new generator is created from the global numpy random state.
 
     Note:
-        This transform is applied at load time (per :class:`~ehc_sn.data.datasets.ProcessedDataset`
+        This transform is applied at load time (per :class:`~ehp_sn.data.datasets.ProcessedDataset`
         ``__getitem__`` call), not baked into on-disk files.
 
         Samples that mix spatial grids with non-spatial task fields (for

@@ -102,7 +102,7 @@ def apply_mazehard_trace_supplements(  # --------------------------------------
     produce spatial geometry supplements for existing figure consumers.
 
     Args:
-        trace: The :class:`~ehc_sn.traces.trace_tree.TraceTree` to modify in-place.
+        trace: The :class:`~ehp_sn.traces.trace_tree.TraceTree` to modify in-place.
         supplements: The supplement content to attach.
     """
 

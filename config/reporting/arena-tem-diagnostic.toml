@@ -2,7 +2,7 @@ schema = "ehp_sn.report.request.v1"
 name = "arena-tem-diagnostic"
 
 [source]
-uri = "artifacts/eval/tem-v2-arena"
+uri = "artifacts/evaluation/tem-v2-arena"
 regime = "diagnostic"
 
 [selection]

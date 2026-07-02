@@ -1,12 +1,57 @@
 """Controller families for EHP-SN rollout execution.
 
-Canonical import paths:
+One-step, task-agnostic control transitions over recurrent model execution.
 
-- :mod:`ehc_sn.controllers.contracts.actor_critic` — neutral actor-critic contracts.
-- :mod:`ehc_sn.controllers.deliberation.act` — ACT deliberation controller.
-- :mod:`ehc_sn.controllers.deliberation.actor_critic` — deliberation actor-critic controller.
-- :mod:`ehc_sn.controllers.replay.trajectory` — stepwise trajectory replay.
-- :mod:`ehc_sn.controllers.online.actor_critic` — online RL controller.
+A controller owns:
 
-Internal support modules: ``_base.py``, ``_env_rollout.py``.
+    slot admission/reset → backbone transition → control decision → next carry
+
+The outer runner (``ehp_sn.rollouts.RecurrentRunner``) owns iteration.
+See :doc:`/design/controllers` for the full architectural rationale.
+
+Public API — stable names that survive internal refactors::
+
+    from ehc_sn.controllers import (
+        ACTController,
+        ACTControllerConfig,
+        DeliberationQHaltingController,
+        DeliberationQHaltingControllerConfig,
+        ReplayTrajectoryController,
+        ReplayTrajectoryControllerConfig,
+        RLController,
+        RLControllerConfig,
+        StepController,
+    )
+
+Advanced callers import infrastructure from defining modules::
+
+    from ehc_sn.controllers.state import RolloutState, ReplayRolloutState
+    from ehc_sn.controllers.records import QHaltingInteractionRecord
+    from ehc_sn.controllers._base import BaseController
+    from ehc_sn.controllers.factory import build_controller
 """
+
+from ehc_sn.controllers.base import StepController
+from ehc_sn.controllers.deliberation import (
+    ACTController,
+    ACTControllerConfig,
+    DeliberationQHaltingController,
+    DeliberationQHaltingControllerConfig,
+)
+from ehc_sn.controllers.online import RLController, RLControllerConfig
+from ehc_sn.controllers.replay import (
+    ReplayTrajectoryController,
+    ReplayTrajectoryControllerConfig,
+)
+
+__all__ = [
+    "ACTController",
+    "ACTControllerConfig",
+    "DeliberationQHaltingController",
+    "DeliberationQHaltingControllerConfig",
+    "ReplayTrajectoryController",
+    "ReplayTrajectoryControllerConfig",
+    "RLController",
+    "RLControllerConfig",
+    "StepController",
+]

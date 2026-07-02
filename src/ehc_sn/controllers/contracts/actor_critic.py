@@ -6,8 +6,8 @@ controller that drives a policy-plus-value backbone and emits interaction
 records may use them.
 
 Online RL pieces (``RLRolloutState``, ``RLController``) live in
-:mod:`ehc_sn.controllers.online.actor_critic`; the task-environment adapter
-lives in :mod:`ehc_sn.contracts.task_environment`.
+:mod:`ehp_sn.controllers.online.actor_critic`; the task-environment adapter
+lives in :mod:`ehp_sn.contracts.task_environment`.
 
 The two minimal bootstrap protocols (:class:`OnlineBootstrapCarry` and
 :class:`OnlineBootstrapRuntime`) are defined here so that both the training
@@ -99,7 +99,7 @@ class OnlineBootstrapCarry(QHaltingExecutionSnapshot, Protocol):
     ``model_state``, which is the only additional field accessed during online
     bootstrap value computation.
 
-    :class:`~ehc_sn.controllers.online.actor_critic.RLRolloutState` satisfies
+    :class:`~ehp_sn.controllers.online.actor_critic.RLRolloutState` satisfies
     this protocol structurally.  No concrete RL types need be imported into the
     training layer.
     """
@@ -112,7 +112,7 @@ class OnlineBootstrapRuntime(Protocol):
     """Minimal task-runtime surface required for online TD(0) bootstrap extraction.
 
     Implement this protocol in the task-runtime layer (e.g.
-    :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`) to expose
+    :class:`~ehp_sn.contracts.task_environment.TaskEnvironmentAdapter`) to expose
     only the one method that the learner requires.  The full env-step shaping
     contract is not needed by the training layer.
     """

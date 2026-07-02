@@ -1,13 +1,13 @@
 """Rollout materialization — scored step and chunk containers.
 
-These types are produced by :func:`~ehc_sn.rollouts.scoring.score_rollout_chunk`
+These types are produced by :func:`~ehp_sn.rollouts.scoring.score_rollout_chunk`
 and consumed by metrics aggregation, trace observers, and evaluation paths.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, Mapping, TypeVar
+from typing import Generic, TypeVar
 
 from torch import Tensor
 
@@ -50,12 +50,19 @@ class ObservedStep(Generic[ScoredOutputT]):
 # =============================================================================
 @dataclass(frozen=True)
 class EvaluatedChunk(Generic[CarryT, ScoredOutputT]):
-    """Objective-scored rollout fragment returned by a pure objective."""
+    """Storage-safe objective-scored rollout fragment.
+
+    ``loss`` is a detached zero-dimensional CPU tensor.  The live recurrent
+    carry is *not* stored here — it lives in the runner's ``RolloutExecution``
+    or ``RolloutChunk`` and is released after case execution.
+    """
 
     steps: tuple[ObservedStep[ScoredOutputT], ...]
     loss: Tensor
-    final_carry: CarryT
     source_exhausted: bool = False
+
+    def __post_init__(self) -> None:
+        pass  # Enforcement is at the persistence boundary (offline.py).
 
     @property
     def last_step(self) -> ObservedStep[ScoredOutputT]:

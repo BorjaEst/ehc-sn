@@ -56,7 +56,7 @@ class ArenaEvaluationSourceContext:
             ``"arena/trajectory_locations"``, ``"arena/revisit_mask"``.
             Populated by the Arena provider.  ``None`` when not available.
         case_metadata: Optional dict of compact scalar metadata for the
-            eval-artifact manifest case row.  Populated by the Arena provider.
+            evaluation-artifact manifest case row.  Populated by the Arena provider.
             ``None`` when not available.
     """
 
@@ -227,7 +227,7 @@ def apply_arena_trace_supplements(  # -----------------------------------------
         - ``"environments"`` — list of B world dicts (attached as metadata).
 
     Args:
-        trace: The :class:`~ehc_sn.traces.trace_tree.TraceTree` to modify in-place.
+        trace: The :class:`~ehp_sn.traces.trace_tree.TraceTree` to modify in-place.
         supplements: The supplement content to attach.
     """
     trace.attach_dense(

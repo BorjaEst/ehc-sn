@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor
 
-from ehc_sn.eval.contracts import EvaluationCaseResult
+from ehc_sn.evaluation.contracts import EvaluationCaseResult
 from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
 from ehc_sn.types import Batch
 
@@ -653,7 +653,7 @@ def compute_seqmaze_score_report(
 
     # For each sample, count valid transitions in the prefix
     # TODO(perf): vectorize the per-sample loops below.  Acceptable for v1
-    # research baseline but will bottleneck eval at large batch sizes.
+    # research baseline but will bottleneck evaluation at large batch sizes.
     valid_trans_rates = torch.zeros(B, device=device)
     for b in range(B):
         t_len = int(T_actual[b].item())

@@ -1,8 +1,31 @@
 # Trace Architecture
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > Canonical design for `ehp_sn.traces` — the subsystem responsible for turning
 > runtime model state into a stable, versioned, queryable scientific trace
 > artifact.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Trace vocabulary (`TraceKey`, `TraceFieldSpec`); capture profiles; extraction; collection lifecycle; dense/sparse storage; artifact manifests; reader API |
+| **Must not own**      | Metric computation; diagnostic interpretation; figure construction; report generation; model architecture; rollout execution                              |
+| **Public API**        | `TraceTree`, `TraceObserver`, `TraceSpec`, `TraceField`, `TraceValue`, `TraceSink`, `ZarrTraceSink`, `TraceReader`, `open_trace`                          |
+| **Allowed imports**   | `contracts`, `types`, `rollouts` (record types only)                                                                                                      |
+| **Forbidden imports** | `evaluation`, `diagnostics`, `figures`, `reporting`, `lightning`, `training`                                                                              |
+| **Layer**             | L5 — Observability & Evaluation                                                                                                                           |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                                             |
+
+---
 
 `ehp_sn.traces` defines a versioned semantic vocabulary for temporal scientific
 data, resolves named capture profiles against runtime capabilities, extracts

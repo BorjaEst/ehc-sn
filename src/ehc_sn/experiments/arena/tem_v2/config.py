@@ -15,10 +15,6 @@ Hierarchy (training):
     ├── checkpointing: CheckpointingConfig
     └── logging: LoggerSettings
 
-Hierarchy (evaluation):
-
-    ArenaTEMV2EvaluationExperimentConfig
-    └── model: ArenaTEMV2ModelConfig (same as above)
 """
 
 from __future__ import annotations
@@ -33,11 +29,9 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.variational_replay import TEMTrainingConfig
@@ -123,36 +117,19 @@ class ArenaTEMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
     )
 
 
-class ArenaTEMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for Arena × TEM-v2."""
+class ArenaTEMV2EvaluationOptions(EvaluationOptions):
+    """Pair-specific evaluation options for Arena × TEM-v2.
 
-    model: ArenaTEMV2ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: Optional[TEMRuntimeConfig] = Field(
-        default=None,
-        description="Execution policy for eval-time runtime dynamics. "
-        "None skips runtime configuration (not valid for actual eval).",
-    )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
-    )
+    Currently empty — all evaluation options inherited from recipe defaults.
+    """
+
+    pass
 
 
 # =============================================================================
 __all__ = [
     "ArenaTEMV2ComponentConfigs",
+    "ArenaTEMV2EvaluationOptions",
     "ArenaTEMV2ModelConfig",
     "ArenaTEMV2TrainingExperimentConfig",
-    "ArenaTEMV2EvaluationExperimentConfig",
 ]

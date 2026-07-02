@@ -820,7 +820,7 @@ def build_arena_task_corpus(
             extent=[max_grid_h, max_grid_w],
             n_samples=split_counts,
             source_id=layout_family,
-            builder="ehc_sn.tasks.arena.build_arena_task_corpus",
+            builder="ehp_sn.tasks.arena.build_arena_task_corpus",
             seed=seed,
             stage_params=stage_params,
             task=TASK_FAMILY,

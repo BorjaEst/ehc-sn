@@ -2,9 +2,9 @@
 
 Each subdirectory corresponds to a ``FigureCategory``:
 
-- :mod:`~ehc_sn.figures.templates.task` — task overview figures (data-gen)
-- :mod:`~ehc_sn.figures.templates.evaluation` — prediction/reasoning figures (inspect)
-- :mod:`~ehc_sn.figures.templates.diagnostics` — internal-state diagnostics
+- :mod:`~ehp_sn.figures.templates.task` — task overview figures (data-gen)
+- :mod:`~ehp_sn.figures.templates.evaluation` — prediction/reasoning figures (inspect)
+- :mod:`~ehp_sn.figures.templates.diagnostics` — internal-state diagnostics
 
 Import from the category subdirectory directly::
 

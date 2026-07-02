@@ -20,7 +20,11 @@ def build_shared_norm(arrays: Iterable[np.ndarray]) -> Normalize:
         A Normalize instance covering the finite range of the arrays.
     """
     array_list = list(arrays)
-    values = np.concatenate([arr.ravel() for arr in array_list if arr.size]) if array_list else np.array([])
+    values = (
+        np.concatenate([arr.ravel() for arr in array_list if arr.size])
+        if array_list
+        else np.array([])
+    )
     finite_mask = np.isfinite(values)
     if values.size == 0 or not finite_mask.any():
         return Normalize(vmin=0.0, vmax=1.0)
@@ -48,9 +52,11 @@ def build_shared_minmax(
         Tuple of (vmin, vmax) for the finite values.
     """
     array_list = list(arrays)
-    values = np.concatenate(
-        [arr.ravel() for arr in array_list if arr.size]
-    ) if array_list else np.array([])
+    values = (
+        np.concatenate([arr.ravel() for arr in array_list if arr.size])
+        if array_list
+        else np.array([])
+    )
     finite_mask = np.isfinite(values)
     if values.size == 0 or not finite_mask.any():
         vmin, vmax = 0.0, 1.0

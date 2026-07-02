@@ -91,7 +91,7 @@ between structural state and arena-specific content). Arena trains this
 subsystem through trajectories; EHP later uses it as a memory system.
 
 For detailed theoretical background, see
-[EHP Theory Foundations](../ehc-theory-foundations.md) and
+[EHP Theory Foundations](../ehp-theory-foundations.md) and
 [PFC Working Memory Theory](../pfc-working-memory-theory.md).
 
 ## Regional modules
@@ -326,7 +326,7 @@ problems?
 ## Implementation status
 
 - **`EHCModelV1`** — the current code-level EHP model (imported as
-  `ehc_sn.models.ehp.ehp_v1.EHCModelV1`). Implements an integrated
+  `ehp_sn.models.ehp.ehp_v1.EHCModelV1`). Implements an integrated
   PFC/STR/LEC/MEC/HPC step surface with adapter-mediated task binding. This is
   the existing implementation, not one of the four proposed query-interface
   variants.
@@ -347,7 +347,7 @@ scripts/training/ehc_v1_pretraining.py
 - [Memory-Mediated Reasoning](../memory-mediated-reasoning.md) — full
   theoretical framework with equations, training stages, controls, and causal
   evidence requirements for `ehp_v1`–`ehp_v4`.
-- [EHP Theory Foundations](../ehc-theory-foundations.md) — the five-ingredient
+- [EHP Theory Foundations](../ehp-theory-foundations.md) — the five-ingredient
   theoretical synthesis (TEM, transformer-hippocampus, structured PFC,
   hierarchical reasoning, top-down control).
 - [PFC Working Memory Theory](../pfc-working-memory-theory.md) — slot layout,

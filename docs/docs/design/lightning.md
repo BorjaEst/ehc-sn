@@ -5,19 +5,44 @@ description: Narrow execution adapter for framework-independent training runtime
 
 # Lightning Adapter Design (`ehp_sn.lightning`)
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > A narrow execution adapter around framework-independent training runtimes.
 
-The Lightning package is the **framework integration layer**, not the owner of
-models, objectives, metrics, data semantics, rollout logic, or experiment
-definitions. Its job is to translate the framework-independent EHP system into
-the lifecycle expected by `lightning.pytorch.Trainer`:
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | LightningModule adapters; DataModule adapters; Trainer/callback/logger construction; checkpoint storage integration; `loss.backward()` as framework primitive |
+| **Must not own**      | Model architecture; loss mathematics; metric definitions; rollout algorithms; dataset formats; backward policy (when to call)                                 |
+| **Public API**        | `TaskLightningModule`, `ManualOptimizationLightningModule`, `EHPDataModule`, `build_trainer`, `build_lightning_optimization`                                  |
+| **Allowed imports**   | `training` (contracts, TrainingRuntime), `data`, `metrics`, `evaluation` (contracts), `traces` (contracts), `models` (nn.Module), `objectives`                |
+| **Forbidden imports** | (none — top of dependency stack for backend layer)                                                                                                            |
+| **Layer**             | L4 — Backend Integrations                                                                                                                                     |
+| **Invariant**         | No domain package (L0–L3, L5–L6) may import from `lightning/`                                                                                                 |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                                                 |
+
+---
+
+The Lightning package is the **framework integration layer** (Layer 6 in the
+repository dependency graph), not the owner of models, objectives, metrics,
+data semantics, rollout logic, or experiment definitions. Its job is to
+translate the framework-independent EHP system into the lifecycle expected
+by `lightning.pytorch.Trainer`:
 
 ```
 EHP domain objects
     model, objective, task runtime, metrics, data module, configuration
         │
         ▼
-ehp_sn.lightning
+ehp_sn.lightning                     ← Layer 6 (Framework Integration)
     LightningModule adapters
     LightningDataModule adapters
     callbacks, Trainer construction, checkpoint integration
@@ -25,8 +50,6 @@ ehp_sn.lightning
         ▼
 lightning.pytorch.Trainer
 ```
-
----
 
 ## 1. Core principle: adapt, do not define
 
@@ -50,6 +73,8 @@ makes `ehp_sn.lightning` replaceable.
 - Adapt project data providers to the `LightningDataModule` lifecycle where
   needed.
 - Translate Lightning lifecycle events into project runtime lifecycle events.
+- **Execute `loss.backward()` as a framework primitive** — training owns the
+  policy of when and whether to call backward; Lightning executes the call.
 
 ### What it must not own
 
@@ -67,6 +92,8 @@ makes `ehp_sn.lightning` replaceable.
 | Experiment resolution                   | `ehp_sn.experiments` |
 | Model construction policy               | `ehp_sn.experiments` |
 | Figure generation                       | `ehp_sn.figures`     |
+| Backward policy (when to call)          | `ehp_sn.training`    |
+| Checkpoint emission policy              | `ehp_sn.training`    |
 
 ### Invariant: dependency direction
 
@@ -76,7 +103,7 @@ ehp_sn.lightning
 ehp_sn.training, ehp_sn.data, ehp_sn.metrics, ehp_sn.models,
 ehp_sn.objectives, ehp_sn.evaluation, ehp_sn.traces
 
-No domain package imports ehp_sn.lightning.
+No domain package (Layers 0–5) imports ehp_sn.lightning.
 ```
 
 ---

@@ -352,6 +352,9 @@ class TraceTree:
             next_seg = suffix.split("/", maxsplit=1)[0]
             if next_seg.isdigit():
                 indices.add(int(next_seg))
+            # Also accept ``freq_N`` convention used by model trace views.
+            elif next_seg.startswith("freq_") and next_seg[5:].isdigit():
+                indices.add(int(next_seg[5:]))
         return len(indices)
 
     def validate_env_idx(  # --------------------------------------------------
@@ -370,12 +373,34 @@ class TraceTree:
         self,
         base_path: str,
         freq_idx: int,
-    ) -> int:
-        """Validate and return frequency index."""
+    ) -> str:
+        """Validate *freq_idx* and return the actual path suffix for this
+        frequency (e.g. ``\"freq_0\"`` or ``\"0\"``)."""
         n_freq = self.n_freq(base_path)
         if not (0 <= freq_idx < n_freq):
             raise IndexError(f"freq_idx {freq_idx} out of range [0, {n_freq})")
-        return freq_idx
+
+        # Find the Nth frequency child and return its suffix.
+        prefix = base_path.strip("/")
+        child_prefix = f"{prefix}/"
+        for path_str in self.path_strs:
+            if not path_str.startswith(child_prefix):
+                continue
+            suffix = path_str[len(child_prefix) :]
+            if not suffix:
+                continue
+            next_seg = suffix.split("/", maxsplit=1)[0]
+            idx: int | None = None
+            if next_seg.isdigit():
+                idx = int(next_seg)
+            elif next_seg.startswith("freq_") and next_seg[5:].isdigit():
+                idx = int(next_seg[5:])
+            if idx is not None and idx == freq_idx:
+                return next_seg
+
+        raise IndexError(
+            f"freq_idx {freq_idx} not found in paths under {child_prefix}"
+        )
 
     def _init_from_first(  # --------------------------------------------------
         self,

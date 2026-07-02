@@ -525,7 +525,7 @@ def canonical_dag_digest(
     node_ids_sorted = sorted(int(obs_ids[i]) for i in range(n))
 
     canonical = {
-        "schema": f"ehc-sn.dag.v{schema_version}",
+        "schema": f"ehp-sn.dag.v{schema_version}",
         "n_nodes": n,
         "nodes": node_ids_sorted,
         "edges": edges_sorted,
@@ -568,7 +568,7 @@ def construction_dag_digest(
             edges_as_seen.append([int(obs_ids[u]), int(obs_ids[v])])
 
     record: dict = {
-        "schema": f"ehc-sn.dag.provenance.v{schema_version}",
+        "schema": f"ehp-sn.dag.provenance.v{schema_version}",
         "n_nodes": n,
         "rank_to_obs_id": [int(obs_ids[i]) for i in range(n)],
         "edges": edges_as_seen,

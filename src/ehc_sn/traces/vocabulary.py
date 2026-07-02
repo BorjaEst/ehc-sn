@@ -39,16 +39,16 @@ class TraceFieldSpec:
 # Prediction fields — shared across tasks that produce decoded outputs
 # =============================================================================
 
-PRED_SOLUTION_OVERLAY = TraceFieldSpec(
-    name="pred/solution_overlay",
+PRED_PREDICTION_OVERLAY = TraceFieldSpec(
+    name="pred/prediction_overlay",
     description="Decoded path overlay over maze-grid spatial slots, per reasoning step.",
     storage="dense",
     dtype="uint8",
     axes=("reasoning_step", "batch", "spatial_slot"),
 )
 
-TARGET_SOLUTION_OVERLAY = TraceFieldSpec(
-    name="target/solution_overlay",
+TARGET_PREDICTION_OVERLAY = TraceFieldSpec(
+    name="target/prediction_overlay",
     description="Oracle/ground-truth path overlay over maze-grid spatial slots.",
     storage="meta",
     dtype="uint8",
@@ -102,8 +102,8 @@ ROUTEBIND_TRAJECTORY_FIELD = TraceFieldSpec(
 TRACE_VOCABULARY: dict[str, TraceFieldSpec] = {
     spec.name: spec
     for spec in [
-        PRED_SOLUTION_OVERLAY,
-        TARGET_SOLUTION_OVERLAY,
+        PRED_PREDICTION_OVERLAY,
+        TARGET_PREDICTION_OVERLAY,
         PRED_OBSERVATION_ID_POST,
         PRED_OBSERVATION_ID_RECALL,
         PRED_OBSERVATION_ID_PATH,
@@ -119,8 +119,8 @@ def list_vocabulary_names() -> list[str]:
 
 
 __all__ = [
-    "PRED_SOLUTION_OVERLAY",
-    "TARGET_SOLUTION_OVERLAY",
+    "PRED_PREDICTION_OVERLAY",
+    "TARGET_PREDICTION_OVERLAY",
     "PRED_OBSERVATION_ID_POST",
     "PRED_OBSERVATION_ID_RECALL",
     "PRED_OBSERVATION_ID_PATH",

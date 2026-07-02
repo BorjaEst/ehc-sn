@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Iterable,
@@ -19,6 +21,9 @@ import pub_ready_plots as prp
 import scienceplots  # noqa: F401 (registers "science", "nature", ...)
 
 from ehc_sn.traces.trace_tree import TraceTree
+
+if TYPE_CHECKING:
+    from ehc_sn.evaluation.contracts import ArtifactRequirement
 
 _ShapeConstraint: TypeAlias = dict[str, object]
 """A dictionary of optional shape constraints for one trace key.
@@ -41,7 +46,7 @@ FigureCategory: TypeAlias = Literal["task", "evaluation", "diagnostic"]
     Consumes a corpus sample.  Used by data-gen inspect.
 ``"evaluation"``
     Shows what the model predicted relative to the task contract.
-    Consumes an evaluation artifact.  Used by eval inspect.
+    Consumes an evaluation artifact.  Used by evaluation inspect.
 ``"diagnostic"``
     Shows internal model behavior or mechanism.
     Consumes traces, diagnostic artifacts, or an active model run.
@@ -100,36 +105,51 @@ FigureMaturity: TypeAlias = Literal["experimental", "stable", "deprecated"]
     Kept for compatibility; not recommended for new report specs.
 """
 
-FigureSurface: TypeAlias = Literal["training", "diagnostic", "report"]
-"""Permitted rendering surfaces for a figure.
 
-``"training"``
-    May be emitted during training callbacks or TensorBoard previews.
-``"diagnostic"``
-    May be rendered manually for debugging or model inspection.
-``"report"``
-    May be rendered by ``ehc_sn.reporting`` into a ``ReportRun``.
-"""
+class FigureSurface(StrEnum):
+    """Permitted rendering surfaces for a figure.
 
-FigureInputContract: TypeAlias = Literal[
-    "bounded_trace",
-    "evaluation_artifact",
-    "offline_artifact",
-]
-"""Minimum trace fidelity required for a figure to produce correct output.
+    ``INSPECTION``
+        May be rendered manually for debugging or model inspection.
+    ``REPORT``
+        May be rendered from evaluation artifacts via ``ehp_sn.figures.render``
+        and composed into notebook reports via ``ehp_sn.reporting`` loaders.
+    ``TRAINING``
+        May be emitted during training callbacks or TensorBoard previews.
+    """
 
-Values
-    bounded_trace
-        May be truncated (limited batches), partial metadata.
-        Safe for ``FigureGenerationCallback`` (diagnostic capture path).
-    evaluation_artifact
-        Requires a complete trajectory with all requested trace/metadata
-        keys present.  Produced by evaluator regime runs.
-    offline_artifact
-        Requires a trace loaded from persisted disk artifacts
-        (``load_artifact_run_cases``).  May depend on
-        artifact-format guarantees (numpy vs torch, deserialization).
-"""
+    INSPECTION = "inspection"
+    REPORT = "report"
+    TRAINING = "training"
+
+
+# ── Figure input variants (tagged union) ──────────────────────────────────
+
+
+@dataclass(frozen=True)
+class TaskDataInputs:
+    """Inputs for a TASK_DATA figure: corpus meta-keys only."""
+
+    meta_keys: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class TraceInputs:
+    """Inputs for a BOUNDED_TRACE figure: trace keys and optional meta keys."""
+
+    trace_keys: frozenset[str] = field(default_factory=frozenset)
+    meta_keys: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class ArtifactInputs:
+    """Inputs for an ARTIFACT figure: typed analysis/aggregate artifact refs."""
+
+    artifacts: frozenset[ArtifactRequirement] = field(default_factory=frozenset)
+
+
+FigureInputs = TaskDataInputs | TraceInputs | ArtifactInputs
+"""Tagged union of all supported figure input contracts."""
 
 
 @dataclass(frozen=True)
@@ -159,15 +179,27 @@ class FigureContext:
     global_step: Optional[int] = None
     split_name: Optional[str] = None
 
-    # Eval-artifact root for probe-backed figures
+    # evaluation-artifact root for probe-backed figures
     artifact_path: Path | None = None
     """Path to the evaluation artifact root directory.
 
     Probe-backed figures (e.g. ``pfc_path_memory_probe``) use this to
     resolve compact probe artifacts (``probes/*.npz``) relative to the
-    eval artifact directory.  Set by ``ReportFigureRenderer`` during
-    report builds; ``None`` in diagnostic/training surfaces.
+    evaluation artifact directory.  Set by report loaders or the artifact
+    inspection pipeline; ``None`` in diagnostic/training surfaces.
     """
+    artifact_data: dict[str, object] | None = None
+    """Pre-loaded artifact data for ARTIFACT-contract figures.
+
+    Populated by the ``render`` subcommand or report pipeline.  The dict
+    is keyed by ``ArtifactRequirement.key.manifest_key()`` and contains
+    loaded NumPy arrays or data dicts.
+    """
+
+
+# _validate_figure_spec is intentionally removed.  The tagged union
+# FigureInputs (TaskDataInputs | TraceInputs | ArtifactInputs) makes
+# contradictory field combinations structurally unrepresentable.
 
 
 @dataclass(frozen=True)
@@ -189,12 +221,10 @@ class FigureSpec:
 
     maturity: FigureMaturity = "experimental"
     allowed_surfaces: set[FigureSurface] = field(
-        default_factory=lambda: {"diagnostic"}
+        default_factory=lambda: {FigureSurface.INSPECTION}
     )
-    input_contract: FigureInputContract = "evaluation_artifact"
+    inputs: FigureInputs = field(default_factory=TaskDataInputs)
     tags: set[str] = field(default_factory=set)
-    trace_keys: set[str] = field(default_factory=set)
-    meta_keys: set[str] = field(default_factory=set)
     required_numeric: dict[str, _ShapeConstraint] | None = None
     """Per-key shape constraints checked in addition to key presence.
 
@@ -211,6 +241,94 @@ class FigureSpec:
     temporal validation.
     """
     description: str = ""
+    version: int = 1
+    """Schema version for this figure's dependency declaration and renderer.
+
+    Bump when the figure's ``inputs``, ``trace_keys``, ``meta_keys``, or
+    renderer materially change.  Used in the plan digest for reuse matching.
+    """
+
+    @property
+    def contract_kind(self) -> str:
+        """Return a short string identifying the input-contract variant.
+
+        One of ``"task_data"``, ``"trace"``, or ``"artifact"``.
+        """
+        match self.inputs:
+            case TaskDataInputs():
+                return "task_data"
+            case TraceInputs():
+                return "trace"
+            case ArtifactInputs():
+                return "artifact"
+
+
+# ── FigureSelection ───────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class FigureSelection:
+    """Result of selecting figures by surface or other criteria.
+
+    Attributes
+    ----------
+    specs:
+        Compatible figures.
+    excluded:
+        Diagnostics for figures that were considered but excluded.
+    """
+
+    specs: tuple[FigureSpec, ...] = ()
+    excluded: tuple[dict[str, object], ...] = ()
+
+    @classmethod
+    def for_surface(
+        cls,
+        surface: FigureSurface,
+        *,
+        registry: "Registry",
+    ) -> "FigureSelection":
+        """Return all registered figures whose ``allowed_surfaces`` contain *surface*."""
+        selected: list[FigureSpec] = []
+        for name in sorted(registry._specs):
+            spec = registry._specs[name]
+            if surface in spec.allowed_surfaces:
+                selected.append(spec)
+        return cls(specs=tuple(selected))
+
+    def exclude_unsupported(
+        self,
+        *,
+        surface: FigureSurface,
+    ) -> "FigureSelection":
+        """Return a new selection filtered to figures whose inputs
+        are compatible with the given *surface*.
+
+        For ``INSPECTION``: excludes ``ArtifactInputs`` figures.
+        For ``REPORT`` and ``TRAINING``: any input contract is acceptable.
+        """
+        compatible: list[FigureSpec] = []
+        excluded_list: list[dict[str, object]] = []
+        for spec in self.specs:
+            if surface is FigureSurface.INSPECTION and isinstance(
+                spec.inputs, ArtifactInputs
+            ):
+                excluded_list.append(
+                    {
+                        "figure_key": spec.name,
+                        "code": "unsupported_contract",
+                        "message": (
+                            f"Figure {spec.name!r} uses ArtifactInputs, "
+                            f"which is not supported on INSPECTION surface."
+                        ),
+                    }
+                )
+            else:
+                compatible.append(spec)
+        return FigureSelection(
+            specs=tuple(compatible),
+            excluded=tuple(excluded_list),
+        )
 
 
 class Registry:
@@ -226,7 +344,10 @@ class Registry:
             spec: Figure specification.
 
         Raises:
-            ValueError: If the name is already registered.
+            ValueError: If the name is already registered or the spec's
+                input-contract validation fails.
+            TypeError: If ``category`` is not a ``FigureCategory`` or
+                ``input_contract`` is not a ``FigureInputContract``.
         """
         if spec.name in self._specs:
             raise ValueError(f"Figure '{spec.name}' already registered")
@@ -274,7 +395,7 @@ class Registry:
         *,
         maturity: FigureMaturity | None = None,
         surface: FigureSurface | None = None,
-        input_contract: FigureInputContract | None = None,
+        input_contract: str | None = None,
         tags: set[str] | None = None,
     ) -> list[FigureSpec]:
         """Return sorted list of figure specs, optionally filtered.
@@ -283,7 +404,8 @@ class Registry:
             maturity: Optional maturity filter.
             surface: Optional allowed-surface filter.  When set, only specs
                 whose ``allowed_surfaces`` contain *surface* are returned.
-            input_contract: Optional input contract filter.
+            input_contract: Optional input contract filter (``"trace"``,
+                ``"task_data"``, ``"artifact"``).
             tags: Optional tag filter.  When not ``None``, only specs whose
                 ``tags`` are a superset of this set are returned.  An empty
                 set matches all specs (identity filter).
@@ -297,7 +419,7 @@ class Registry:
         if surface is not None:
             specs = [s for s in specs if surface in s.allowed_surfaces]
         if input_contract is not None:
-            specs = [s for s in specs if s.input_contract == input_contract]
+            specs = [s for s in specs if s.contract_kind == input_contract]
         if tags is not None:
             specs = [s for s in specs if tags.issubset(s.tags)]
         return sorted(specs, key=lambda s: s.name)
@@ -425,10 +547,23 @@ class Registry:
             the selected figure set.
         """
         specs = self.list_specs(tags=tags)
-        return set().union(*(s.meta_keys for s in specs))
+
+        def _collect_meta(s: FigureSpec) -> set[str]:
+            match s.inputs:
+                case TaskDataInputs(meta_keys=mk) | TraceInputs(meta_keys=mk):
+                    return mk if isinstance(mk, set) else set(mk)
+                case _:
+                    return set()
+
+        return set().union(*(_collect_meta(s) for s in specs))
 
 
 REGISTRY = Registry()
+
+
+def _resolve_input_kind(spec: FigureSpec) -> str:
+    """Return the input kind literal for display / logging."""
+    return spec.contract_kind
 
 
 def _trace_has_numeric_path(trace: TraceTree, path: str) -> bool:
@@ -468,21 +603,30 @@ def _validate_figure_requirements(
         ValueError: If any required key is absent, shape constraint is
             violated, or temporal-semantics requirement is not met.
     """
-    # --- Key presence (existing) ---
-    if spec.trace_keys:
+    # --- Key presence ---
+    trace_keys: frozenset[str] = frozenset()
+    meta_keys: frozenset[str] = frozenset()
+    match spec.inputs:
+        case TraceInputs(trace_keys=tk, meta_keys=mk):
+            trace_keys = tk
+            meta_keys = mk
+        case TaskDataInputs(meta_keys=mk):
+            meta_keys = mk
+        case ArtifactInputs():
+            pass  # no trace/meta keys to validate
+
+    if trace_keys:
         missing = [
             p
-            for p in sorted(spec.trace_keys)
+            for p in sorted(trace_keys)
             if not _trace_has_numeric_path(trace, p)
         ]
         if missing:
             raise ValueError(
                 f"Figure '{spec.name}' missing required trace keys: {', '.join(missing)}"
             )
-    if spec.meta_keys:
-        missing = [
-            p for p in sorted(spec.meta_keys) if not trace.has_meta_path(p)
-        ]
+    if meta_keys:
+        missing = [p for p in sorted(meta_keys) if not trace.has_meta_path(p)]
         if missing:
             raise ValueError(
                 f"Figure '{spec.name}' missing required metadata keys: {', '.join(missing)}"

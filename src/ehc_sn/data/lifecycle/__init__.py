@@ -11,7 +11,13 @@ Public surface:
 """
 
 from ehc_sn.data.lifecycle._validate import validate_version_root
-from ehc_sn.data.lifecycle._write import create_version_root, extract_version, staging_root, write_index_at_root, write_split
+from ehc_sn.data.lifecycle._write import (
+    create_version_root,
+    extract_version,
+    staging_root,
+    write_index_at_root,
+    write_split,
+)
 
 __all__ = [
     "extract_version",

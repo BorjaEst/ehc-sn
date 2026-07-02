@@ -1,7 +1,30 @@
 # Diagnostics Architecture
 
-> Canonical design for the EHC diagnostic subsystem — how model internals
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
+> Canonical design for the EHP diagnostic subsystem — how model internals
 > are inspected, checked, captured, assessed, and persisted.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owns**              | Health checks (numerical, replay, resource); diagnostic probes; `DiagnosticFinding`, `DiagnosticReport`; severity classification; probe registry |
+| **Must not own**      | Metric accumulation; trace capture; figure rendering; training execution; evaluation orchestration                                               |
+| **Public API**        | `DiagnosticFinding`, `DiagnosticReport`, `DiagnosticSeverity`, `DiagnosticCode`, `ProbeDefinition`, `HealthCheck`, `run_health_checks`           |
+| **Allowed imports**   | `models`, `traces` (TraceReader protocol only), `contracts`, `types`                                                                             |
+| **Forbidden imports** | `training`, `lightning`, `evaluation` (artifact implementations)                                                                                 |
+| **Layer**             | L5 — Observability & Evaluation                                                                                                                  |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                                    |
+
+---
 
 The diagnostics subsystem answers three distinct questions:
 
@@ -29,11 +52,11 @@ Purpose: Deep, targeted       Purpose: Runtime safety      Purpose: Population-l
          single-episode       and sanity during            evidence across cases
          mechanism test       training/evaluation
 
-Trigger: Manual               Trigger: Lifecycle hooks     Trigger: ehp eval run
+Trigger: Manual               Trigger: Lifecycle hooks     Trigger: ehp evaluation run
          (script/notebook)    (after forward/loss/step)    (recipe-driven)
 
-Model:   Loaded, eval()       Model:   Live training       Model:   Loaded by offline
-                                        or eval model               runner
+Model:   Loaded, evaluation()       Model:   Live training       Model:   Loaded by offline
+                                        or evaluation model               runner
 
 Scope:   1 episode             Scope:   1 step/batch/       Scope:   N cases (e.g. 128),
                                          episode                    M steps each
@@ -673,7 +696,7 @@ max_units = 512         ───► └──────────┬──�
                              ┌─────────────────────┐
                              │ TraceSink           │
                              │  InMemoryTraceSink  │  → TraceTree (small recall)
-                             │  ZarrTraceSink      │  → Zarr archive (large eval)
+                             │  ZarrTraceSink      │  → Zarr archive (large evaluation)
                              │  ParquetEventSink   │  → Parquet (event data)
                              └─────────────────────┘
 ```
@@ -751,7 +774,7 @@ diagnostic/*   — model internals (LEC, MEC, HPC)
 
 ### 5.6 TraceConsumer — bridging to evaluation
 
-The `TraceConsumer` (in `eval/consumers.py`) wraps `TraceObserver +
+The `TraceConsumer` (in `evaluation/consumers.py`) wraps `TraceObserver +
 TraceSink` as an `EvaluationConsumer`, enabling it to participate in the
 standard evaluation lifecycle:
 
@@ -772,7 +795,7 @@ The trace assessment bridge converts raw trace data into standardised
 findings:
 
 ```
-   eval artifact directory
+   evaluation artifact directory
             │
             ▼
    load_artifact_run_cases(artifact_dir)
@@ -842,7 +865,7 @@ ehp_sn/diagnostics/
 | ---------------------------- | ---------------------------------- | ------------------------------------- |
 | `TraceField`, `TraceSpec`    | `traces/`                          | Unchanged                             |
 | `TraceObserver`, `TraceSink` | `traces/`                          | Unchanged                             |
-| `TraceConsumer`              | `eval/consumers.py`                | Unchanged                             |
+| `TraceConsumer`              | `evaluation/consumers.py`          | Unchanged                             |
 | Capture profile config       | `config/evaluation/recipes/*.toml` | Unchanged                             |
 | Figure rendering             | `figures/`                         | Unchanged                             |
 | Report-data package          | `reporting/`                       | Presentational layer                  |
@@ -967,7 +990,7 @@ from ehp_sn.diagnostics.checks import (
 | Trace key constants                    | `traces/keys.py`                              | —                                     | String constants                        |
 | Trace observer                         | `traces/observer.py`                          | `StepContext`                         | Per-step values                         |
 | Trace persistence                      | `traces/sink.py`                              | Value stream                          | Zarr / Parquet / in-memory              |
-| Trace→evaluation bridge                | `eval/consumers.py`                           | `StepContext`                         | `ProducedArtifact`                      |
+| Trace→evaluation bridge                | `evaluation/consumers.py`                     | `StepContext`                         | `ProducedArtifact`                      |
 | **Presentation** (outside diagnostics) |                                               |                                       |                                         |
 | Markdown table formatting              | `reporting/diagnostics.py`                    | `BaseModel`                           | `str`                                   |
 | Derived resources (pathway_metrics)    | `reporting/derived.py`                        | `RegimeArtifactSet`                   | `pd.DataFrame`                          |
@@ -1064,7 +1087,7 @@ register_health_check(
 | Trace field definitions                    | `traces/specs.py`                                |
 | Trace key constants                        | `traces/keys.py`                                 |
 | Trace observer / sink                      | `traces/observer.py`, `traces/sink.py`           |
-| Trace → evaluation bridge                  | `eval/consumers.py`                              |
+| Trace → evaluation bridge                  | `evaluation/consumers.py`                        |
 | Capture profile config                     | `config/evaluation/recipes/*.toml`               |
 | Report request config                      | `config/reporting/*.toml`                        |
 | Report-data package preparation            | `reporting/`                                     |

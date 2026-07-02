@@ -40,7 +40,9 @@ class ArenaReplayCapability:
         """Return per-slot trajectory lengths from ``batch["trajectory_length"]``."""
         return batch["trajectory_length"]
 
-    def initial_task_state(self, batch: Batch, *, device: Any) -> dict[str, Tensor]:
+    def initial_task_state(
+        self, batch: Batch, *, device: Any
+    ) -> dict[str, Tensor]:
         """Return empty initial task state — Arena replay v1 is stateless."""
         return {}
 
@@ -71,14 +73,34 @@ class ArenaReplayCapability:
         arange_b = torch.arange(B, device=device)
         t = cursor.to(device=device, dtype=torch.int64)
 
-        observation_id = resident["trajectory_observation_id"][arange_b, t]  # (B,)
-        previous_action = resident["trajectory_previous_action"][arange_b, t]  # (B,)
+        observation_id = resident["trajectory_observation_id"][
+            arange_b, t
+        ]  # (B,)
+        previous_action = resident["trajectory_previous_action"][
+            arange_b, t
+        ]  # (B,)
         landmark_id = resident["trajectory_landmark_id"][arange_b, t]  # (B,)
-        episode_start = resident["trajectory_episode_start"][arange_b, t]  # (B,) bool
+        episode_start = resident["trajectory_episode_start"][
+            arange_b, t
+        ]  # (B,) bool
         is_revisit = resident["trajectory_is_revisit"][arange_b, t]  # (B,) bool
+
+        # Derive a spatial location_id.  When trajectory row/col are available
+        # compute row-major index; otherwise fall back to observation_id as a
+        # spatial proxy (each observation maps to exactly one location).
+        traj_row = resident.get("trajectory_row")
+        traj_col = resident.get("trajectory_col")
+        if traj_row is not None and traj_col is not None:
+            row = traj_row[arange_b, t].to(dtype=torch.int64)
+            col = traj_col[arange_b, t].to(dtype=torch.int64)
+            max_col = traj_col.max().item() + 1
+            location_id = row * max_col + col
+        else:
+            location_id = observation_id.to(dtype=torch.int64)
 
         result: dict[str, Tensor] = {
             "observation_id": observation_id.unsqueeze(-1),
+            "location_id": location_id.unsqueeze(-1),
             "previous_action": previous_action.unsqueeze(-1),
             "landmark_id": landmark_id.unsqueeze(-1),
             "step_count": t.to(dtype=torch.int32).unsqueeze(-1),

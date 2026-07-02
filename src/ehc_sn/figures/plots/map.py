@@ -10,7 +10,11 @@ from numpy.typing import NDArray
 
 from ehc_sn.figures._contracts import AnyWorld
 from ehc_sn.figures.utils.actions import action_patch
-from ehc_sn.figures.utils.axes import _environment_locations, _environment_n_locations, configure_environment_axes
+from ehc_sn.figures.utils.axes import (
+    _environment_locations,
+    _environment_n_locations,
+    configure_environment_axes,
+)
 
 
 def plot_map(
@@ -60,7 +64,10 @@ def plot_map(
     locations = _environment_locations(environment)
     n_locations = _environment_n_locations(environment)
     if values.size != n_locations:
-        raise ValueError("values length must match number of locations: " f"{values.size} != {n_locations}")
+        raise ValueError(
+            "values length must match number of locations: "
+            f"{values.size} != {n_locations}"
+        )
     has_finite = values.size > 0 and np.isfinite(values).any()
 
     # Handle NaN values by using nanmin/nanmax when possible
@@ -68,7 +75,9 @@ def plot_map(
     vmax = (np.nanmax(values) if has_finite else 1.0) if vmax is None else vmax
 
     location_cm = plt.get_cmap(location_cm, num_cols)
-    action_cm = plt.get_cmap(action_cm, max(getattr(environment, "n_actions", 0), 1))
+    action_cm = plt.get_cmap(
+        action_cm, max(getattr(environment, "n_actions", 0), 1)
+    )
 
     # Track invalid values for dedicated styling
     invalid_mask = ~np.isfinite(values)
@@ -80,7 +89,9 @@ def plot_map(
 
     if ax is None:
         _, ax = plt.subplots()
-    ax = configure_environment_axes(ax, environment=environment, radius=radius, invert_y=True)
+    ax = configure_environment_axes(
+        ax, environment=environment, radius=radius, invert_y=True
+    )
 
     location_patches: list = []
     nan_patches: list = []
@@ -115,7 +126,9 @@ def plot_map(
             for action in location["actions"]:
                 if action["probability"] > 0:
                     transitions = np.array(action["transition"])
-                    loc_indices = np.where((transitions > 0) & valid_locations)[0]
+                    loc_indices = np.where((transitions > 0) & valid_locations)[
+                        0
+                    ]
                     locations_to = [locations[loc_to] for loc_to in loc_indices]
                     for loc_to in locations_to:
                         action_patches.append(
@@ -193,4 +206,7 @@ def _location_valid_mask(locations: list[dict]) -> NDArray[np.bool_]:
     """
     if not locations:
         return np.zeros((0,), dtype=bool)
-    return np.asarray([bool(location.get("valid", True)) for location in locations], dtype=bool)
+    return np.asarray(
+        [bool(location.get("valid", True)) for location in locations],
+        dtype=bool,
+    )

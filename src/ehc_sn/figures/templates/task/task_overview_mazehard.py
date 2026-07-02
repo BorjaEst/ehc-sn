@@ -29,7 +29,7 @@ from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    """Render the MazeHard task overview figure from a persisted eval trace."""
+    """Render the MazeHard task overview figure from a persisted evaluation trace."""
     return MazehardTaskLayoutFigure(select_task_layout(trace, ctx), ctx).plot()
 
 

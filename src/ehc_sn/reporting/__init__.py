@@ -1,67 +1,82 @@
-"""Checkpoint identity, report schema contracts, and future report-context
-utilities.
+"""Reporting — resolve evaluation sources, build notebook-facing read models
+and portable report-data packages.
 
-This package must remain free of ``lightning/``, ``eval/``, ``models/``,
-``tasks/``, ``adapters/``, and benchmark imports.  Execution-level bindings
-belong in model-aware packages at Layer 3 or above.
+Report-data package workflow::
+
+    report.toml  →  ehp report prepare  →  report-data package  →  open_report()
+
+Usage::
+
+    from ehc_sn.reporting import (
+        # Package reading
+        ReportDataPackage,
+        open_report,
+        ReportDataProvenance,
+        ReportResource,
+        # Request
+        ReportDataRequest,
+        load_report_data_request,
+        # Preparation
+        prepare_report_data,
+        # Legacy loaders (unchanged)
+        ArenaTemReportData,
+        load_arena_tem_report,
+        load_evaluation,
+        # Errors
+        ReportingError,
+        ReportRequestError,
+        ReportPreparationError,
+        InvalidPackageError,
+        ResourceFormatError,
+    )
 """
 
-from ehc_sn.reporting.builder import build_report_run
-from ehc_sn.reporting.collection import (  # noqa: E402
-    ReportCollection,
-    build_or_load_report_collection,
+from __future__ import annotations
+
+from ehc_sn.reporting.errors import (
+    InvalidPackageError,
+    ReportingError,
+    ReportPreparationError,
+    ReportRequestError,
+    ResourceFormatError,
 )
-from ehc_sn.reporting.figures import (
-    OfflineReportFigureContextSettings,
-    OfflineReportFigureEntrySettings,
-    OfflineReportRenderSettings,
-    ReportFigureRenderer,
-    ReportFigureRendererRegistry,
-    load_figure_index,
-    render_report_figures_from_run,
-    write_figure_index,
-)
-from ehc_sn.reporting.inspection import OpenReport, open_report  # noqa: E402
 from ehc_sn.reporting.loaders import (
-    discover_eval_artifacts,
-    load_eval_artifact_manifest,
-    load_report_spec,
-    select_eval_artifacts,
+    ArenaTemReportData,
+    load_arena_tem_report,
+    load_evaluation,
 )
-from ehc_sn.reporting.metrics.records import (
-    load_metric_records,
-    write_metric_records,
+from ehc_sn.reporting.package import (
+    ReportDataPackage,
+    ReportDataProvenance,
+    ReportResource,
+    open_report,
 )
-from ehc_sn.reporting.notebook import load_report_collection  # noqa: E402
-from ehc_sn.reporting.pipeline import (
-    OfflineEvalJobSpec,
-    ReportPipelineSpec,
-    build_report_run_from_checkpoint,
+from ehc_sn.reporting.preparation import prepare_report_data
+from ehc_sn.reporting.request import (
+    ReportDataRequest,
+    load_report_data_request,
 )
-from ehc_sn.reporting.provenance import (
-    CodeProvenance,
-    ReportRunProvenance,
-)
-from ehc_sn.reporting.reader import ReportRun, load_report_run
-from ehc_sn.reporting.render import load_render_manifest, render_report_run
-from ehc_sn.reporting.schema import (
-    CheckpointSpec,
-    EvalArtifactReference,
-    EvalArtifactSchema,
-    FigureFormat,
-    FigureIndex,
-    FigureIndexEntry,
-    FigureRenderSpec,
-    MetricRecord,
-    MetricSuiteSpec,
-    RegimeKind,
-    RegimeSelector,
-    RenderedOutput,
-    RenderManifest,
-    ReportRenderSpec,
-    ReportRunManifest,
-    ReportRunSchema,
-    ReportSpec,
-    ReportSpecSchema,
-)
-from ehc_sn.reporting.writer import write_report_run_manifest
+
+# =============================================================================
+__all__ = [
+    # Package reading
+    "ReportDataPackage",
+    "open_report",
+    "ReportDataProvenance",
+    "ReportResource",
+    # Request
+    "ReportDataRequest",
+    "load_report_data_request",
+    # Preparation
+    "prepare_report_data",
+    # Legacy loaders (unchanged)
+    "ArenaTemReportData",
+    "load_arena_tem_report",
+    "load_evaluation",
+    # Errors
+    "ReportingError",
+    "ReportRequestError",
+    "ReportPreparationError",
+    "InvalidPackageError",
+    "ResourceFormatError",
+]

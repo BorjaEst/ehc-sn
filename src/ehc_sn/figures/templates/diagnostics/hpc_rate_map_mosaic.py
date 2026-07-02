@@ -19,12 +19,15 @@ Whittington et al. (2022). "Relating transformers to models and neural
 from __future__ import annotations
 
 import math
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from ehc_sn.figures.adapters.hpc import load_hpc_rate_map_mosaic_data
 from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
 from ehc_sn.figures.registry import FigureContext
@@ -33,13 +36,50 @@ from ehc_sn.figures.selectors.hpc import (
     select_hpc_rate_map_mosaic,
 )
 from ehc_sn.figures.utils.axes import subdivide_axes
-from ehc_sn.traces.trace_tree import TraceTree
+
+if TYPE_CHECKING:
+    from ehc_sn.evaluation.contracts import ProducedArtifact
+    from ehc_sn.traces.trace_tree import TraceTree
 
 
-def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    return HPCRateMapMosaicFigure(
-        select_hpc_rate_map_mosaic(trace, ctx), ctx
-    ).plot()
+def plot(
+    trace: TraceTree | None = None,
+    *,
+    ctx: FigureContext | None = None,
+    artifact: ProducedArtifact | None = None,
+    artifact_root: Path | None = None,
+) -> Figure:
+    """Render the HPC rate-map population mosaic.
+
+    Prefers artifact loading when ``artifact`` and ``artifact_root`` are
+    both provided.  Falls back to trace-based computation otherwise.
+
+    Args:
+        trace: Legacy trace tree.
+        ctx: Figure selection context.
+        artifact: Produced artifact from the HPC analysis runner.
+        artifact_root: Root directory containing the artifact.
+
+    Returns:
+        Matplotlib figure with the rate-map mosaic layout.
+
+    Raises:
+        ValueError: If neither trace nor artifact is provided.
+    """
+    if ctx is None:
+        ctx = FigureContext()
+
+    if artifact is not None and artifact_root is not None:
+        data = load_hpc_rate_map_mosaic_data(artifact, artifact_root)
+    elif trace is not None:
+        data = select_hpc_rate_map_mosaic(trace, ctx)
+    else:
+        raise ValueError(
+            "hpc_rate_map_mosaic requires either a trace or an "
+            "analysis artifact."
+        )
+
+    return HPCRateMapMosaicFigure(data, ctx).plot()
 
 
 class HPCRateMapMosaicFigure(BaseFigureTemplate):

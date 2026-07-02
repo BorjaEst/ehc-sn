@@ -61,7 +61,11 @@ def infer_arena_replay_batch_keys(batch: Batch) -> tuple[str, ...]:
     """Return the replay batch keys present in ``batch``, validating required keys."""
     missing = [key for key in ARENA_REPLAY_REQUIRED_KEYS if key not in batch]
     if missing:
-        raise KeyError("Arena replay batch is missing required keys: " + ", ".join(missing) + ".")
+        raise KeyError(
+            "Arena replay batch is missing required keys: "
+            + ", ".join(missing)
+            + "."
+        )
     return ARENA_REPLAY_REQUIRED_KEYS
 
 
@@ -82,7 +86,9 @@ def coerce_arena_targets(
         KeyError: If ``observation_id`` is absent.
     """
     if "observation_id" not in data:
-        raise KeyError("Arena carry data must provide 'observation_id' to build ArenaTargets.")
+        raise KeyError(
+            "Arena carry data must provide 'observation_id' to build ArenaTargets."
+        )
     return ArenaTargets(
         observation_id=data["observation_id"],
         is_revisit=data.get("is_revisit"),
@@ -105,10 +111,17 @@ def coerce_arena_task_input(
     Raises:
         KeyError: If any required field is absent.
     """
-    required = ("observation_id", "previous_action", "step_count", "episode_start")
+    required = (
+        "observation_id",
+        "previous_action",
+        "step_count",
+        "episode_start",
+    )
     missing = [k for k in required if k not in data]
     if missing:
-        raise KeyError(f"Arena task-input payload is missing required fields: {', '.join(missing)}.")
+        raise KeyError(
+            f"Arena task-input payload is missing required fields: {', '.join(missing)}."
+        )
     return ArenaTaskInput(
         observation_id=data["observation_id"],
         previous_action=data["previous_action"],

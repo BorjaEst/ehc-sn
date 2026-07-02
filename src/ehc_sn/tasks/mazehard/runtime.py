@@ -236,15 +236,15 @@ class _MazeHardRuntimeState:
 
 # =============================================================================
 class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
-    """MazeHard implementation of :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`.
+    """MazeHard implementation of :class:`~ehp_sn.contracts.task_runtime.TaskRuntime`.
 
     Owned by the task layer; injected into
-    :class:`~ehc_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
+    :class:`~ehp_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
     at wiring time.
 
     Responsibilities:
         - Own runtime state: step counter plus static MazeHard batch.
-        - Delegate reward computation to :class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
+        - Delegate reward computation to :class:`~ehp_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
         - Mark per-slot termination when ``action == config.halt_action``.
         - Mark per-slot truncation when ``steps >= config.episode_horizon``.
         - Return the static observation unchanged on every step (static-instance
@@ -266,7 +266,7 @@ class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
             config: Task-owned config specifying ``halt_action`` and
                 ``episode_horizon``.
             reward_projector: Task-owned reward projector, injected at wiring
-                time.  Lives in :mod:`ehc_sn.tasks.mazehard.reward`; the runtime
+                time.  Lives in :mod:`ehp_sn.tasks.mazehard.reward`; the runtime
                 does not construct it internally.
         """
         if reward_projector is None:
@@ -334,7 +334,7 @@ class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
         Args:
             state: Current runtime state with static data and step count.
             task_output: Must be a
-                :class:`~ehc_sn.tasks.mazehard.contracts.MazeHardTaskOutput`
+                :class:`~ehp_sn.tasks.mazehard.contracts.MazeHardTaskOutput`
                 with a ``task_logits`` tensor of shape ``(B, S, V)``.
             action: Sampled action tensor of shape ``(B,)``.
             steps: Per-slot step counters of shape ``(B,)`` (post-advance).

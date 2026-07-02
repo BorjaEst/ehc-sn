@@ -15,7 +15,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from ehc_sn.eval.probes import ProbeArtifact, load_probe_artifact
+from ehc_sn.evaluation.probes import ProbeArtifact, load_probe_artifact
 from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
 from ehc_sn.figures.registry import FigureContext

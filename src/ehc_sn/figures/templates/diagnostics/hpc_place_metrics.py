@@ -24,12 +24,16 @@ Skaggs et al. (1993). "An Information-Theoretic Approach to Deciphering
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from ehc_sn.figures.adapters.hpc import load_hpc_place_figure_data
 from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
 from ehc_sn.figures.registry import FigureContext
@@ -38,13 +42,50 @@ from ehc_sn.figures.selectors.hpc import (
     select_hpc_place_metrics,
 )
 from ehc_sn.figures.utils.axes import subdivide_axes
-from ehc_sn.traces.trace_tree import TraceTree
+
+if TYPE_CHECKING:
+    from ehc_sn.evaluation.contracts import ProducedArtifact
+    from ehc_sn.traces.trace_tree import TraceTree
 
 
-def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    return HPCPlaceMetricsFigure(
-        select_hpc_place_metrics(trace, ctx), ctx
-    ).plot()
+def plot(
+    trace: TraceTree | None = None,
+    *,
+    ctx: FigureContext,
+    artifact: ProducedArtifact | None = None,
+    artifact_root: Path | None = None,
+) -> Figure:
+    """Produce the HPC place-metrics figure.
+
+    Prefers artifact-based loading when ``artifact`` and ``artifact_root``
+    are both provided.  Falls back to the legacy trace-based computation
+    when only ``trace`` is given.
+
+    Args:
+        trace: Legacy trace tree (used when artifact is not available).
+        ctx: Figure selection and rendering context.
+        artifact: Produced artifact descriptor from the HPC analysis runner.
+        artifact_root: Root directory containing the artifact.
+
+    Returns:
+        Matplotlib figure with the 1×3 place-metrics layout.
+
+    Raises:
+        ValueError: If neither trace nor artifact is provided, or if
+            artifact is provided without artifact_root.
+    """
+    if artifact is not None and artifact_root is not None:
+        data = load_hpc_place_figure_data(artifact, artifact_root)
+    elif trace is not None:
+        data = select_hpc_place_metrics(trace, ctx)
+    else:
+        raise ValueError(
+            "hpc_place_metrics requires either a trace or an "
+            "analysis artifact.  Use plot(trace=trace, ctx=ctx) "
+            "or plot(artifact=artifact, artifact_root=root, ctx=ctx)."
+        )
+
+    return HPCPlaceMetricsFigure(data, ctx).plot()
 
 
 class HPCPlaceMetricsFigure(BaseFigureTemplate):

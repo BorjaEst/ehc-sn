@@ -9,7 +9,7 @@
 | Source         | HuggingFace `flaitenberger/maze_hard_augmented` |
 | Source ID      | `huggingface/maze_hard_augmented`               |
 | CLI script     | `scripts/data-gen/build-maze-nd.py`             |
-| Builder module | `ehc_sn.data.substrate.maze_nd`                 |
+| Builder module | `ehp_sn.data.substrate.maze_nd`                 |
 | Output path    | `data/interim/maze-nd/v<version>/`              |
 | Dataset class  | `shared_substrate`                              |
 
@@ -79,7 +79,7 @@ non-overlapping partitions using `numpy.random.SeedSequence`.
 | `solution`   | int32 | (H, W) | Integer-encoded solution path. `0` = not on path, `≥1` = step index. |
 
 All spatial channels share the same `(H, W)` shape per sample. Per-sample
-validation is provided by `ehc_sn.data.substrate.grid2d.validate_grid2d_sample`.
+validation is provided by `ehp_sn.data.substrate.grid2d.validate_grid2d_sample`.
 
 ### On-disk layout
 
@@ -179,7 +179,7 @@ Key fields:
 | `extent`                  | `[H, W]` — homogeneous across all samples in the root.          |
 | `n_samples`               | `{"train": N, "val": N, "test": N}`                             |
 | `source_id`               | `"huggingface/maze_hard_augmented"`                             |
-| `builder`                 | `"ehc_sn.data.substrate.maze_nd.build_shared_substrate"`        |
+| `builder`                 | `"ehp_sn.data.substrate.maze_nd.build_shared_substrate"`        |
 | `seed`                    | Deterministic base seed.                                        |
 | `artifact_schema_version` | `1` — content-schema version for the shared-substrate protocol. |
 | `normalization_version`   | `1`                                                             |
@@ -205,6 +205,6 @@ python scripts/data-gen/build-mazehard.py build \
 ## Related
 
 - [Spec: Data Contracts §3.1](../../spec/spec-data-contracts.md)
-- [Grid2D Channel Contracts](../../src/ehc_sn/data/substrate/grid2d.py)
+- [Grid2D Channel Contracts](../../src/ehp_sn/data/substrate/grid2d.py)
 - [MazeHard Task Documentation](../tasks/mazehard.md)
 - [MazeHard Task Builder](../../scripts/data-gen/build-mazehard.py)

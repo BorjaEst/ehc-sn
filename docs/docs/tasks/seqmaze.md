@@ -21,7 +21,7 @@ spatial component, no actions, and no episodic memory.
 Canonical package path:
 
 ```text
-src/ehc_sn/tasks/seqmaze/
+src/ehp_sn/tasks/seqmaze/
 ```
 
 `seqmaze` tests whether a model can reason about sequences and transitions
@@ -183,7 +183,7 @@ The invariant $S = N_{max} + T_{max}$ is enforced at:
 - **Corpus manifest**: records $N_{max}$, $T_{max}$, $S$, $K$, $V$.
 - **Model/training config**: `pfc.seq_length` must equal $S$.
 - **Training startup**: fails fast if model config and corpus manifest disagree.
-- **Evaluation startup**: fails fast if checkpoint profile disagrees with eval corpus.
+- **Evaluation startup**: fails fast if checkpoint profile disagrees with evaluation corpus.
 - **Adapter construction**: fails fast if $N_{max} + T_{max} \neq S$.
 
 A model checkpoint is tied to a specific $(N_{max}, T_{max}, S)$ profile.
@@ -471,7 +471,7 @@ python scripts/data-gen/build-dagflow.py build --preset branching --version 1
 ### Utilities
 
 Graph generation and validation utilities live in
-`src/ehc_sn/tasks/seqmaze/_graph_utils.py`:
+`src/ehp_sn/tasks/seqmaze/_graph_utils.py`:
 
 ```python
 generate_transition_dag(n_nodes, max_out_degree, seed) → adjacency

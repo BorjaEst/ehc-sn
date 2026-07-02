@@ -1,7 +1,7 @@
 """Rate-map drawing functions.
 
-``PreparedRateMap`` is defined in ``ehc_sn.figures._contracts`` and produced
-by the spatial selector layer (``ehc_sn.figures.selectors.spatial``).
+``PreparedRateMap`` is defined in ``ehp_sn.figures._contracts`` and produced
+by the spatial selector layer (``ehp_sn.figures.selectors.spatial``).
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ def plot_rate_map(
         ax.axis("off")
         return ax
 
-    extent = _imshow_extent_from_center_extent(prepared_rate_map.extent, rate_map.shape)
+    extent = _imshow_extent_from_center_extent(
+        prepared_rate_map.extent, rate_map.shape
+    )
 
     finite = np.isfinite(rate_map)
     if vmin is None:
@@ -68,7 +70,11 @@ def plot_rate_map_mosaic(
     cmap: str = "copper_r",
 ) -> Sequence[Axes]:
     """Render multiple prepared rate maps into provided axes."""
-    axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else ([axes] if isinstance(axes, Axes) else list(axes))
+    axes_list = (
+        list(np.ravel(axes))
+        if isinstance(axes, np.ndarray)
+        else ([axes] if isinstance(axes, Axes) else list(axes))
+    )
     if not axes_list:
         return axes_list
 

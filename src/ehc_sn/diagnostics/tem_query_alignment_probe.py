@@ -11,7 +11,7 @@ Public API
 ----------
 - :class:`QueryAlignmentResult` — Pydantic schema for the probe output.
 - :func:`produce_tem_query_alignment_probe` — run the probe against a loaded
-  model and eval batch.
+  model and evaluation batch.
 - :func:`persist_query_alignment_probe` — write the result to a JSON artifact.
 - :func:`format_query_alignment_table` — format as a markdown table.
 
@@ -556,8 +556,8 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
     """
     if model.training:
         raise RuntimeError(
-            "TEM query-alignment probe requires eval mode. "
-            "Call model.eval() before probing."
+            "TEM query-alignment probe requires evaluation mode. "
+            "Call model.evaluation() before probing."
         )
 
     n_freq = len(model._config.hpc.shape)
@@ -1005,8 +1005,8 @@ def produce_tem_attractor_field_probe(  # --------------------------------------
     """
     if model.training:
         raise RuntimeError(
-            "TEM attractor field probe requires eval mode. "
-            "Call model.eval() before probing."
+            "TEM attractor field probe requires evaluation mode. "
+            "Call model.evaluation() before probing."
         )
 
     n_freq = len(model._config.hpc.shape)

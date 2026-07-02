@@ -3,7 +3,14 @@ title: Tasks Design Contract
 description: Domain layer for ehp-sn tasks — task identity, semantic contracts, target derivation, and evaluation semantics
 ---
 
-# Tasks Design Contract (`ehc_sn.tasks`)
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
+# Tasks Design Contract (`ehp_sn.tasks`)
 
 > The task-domain layer of the repository: **what problem is being solved,
 > what constitutes a valid task instance, what information is exposed to the
@@ -17,45 +24,57 @@ reporting, and corpus lifecycle management.
 
 ---
 
+## Normative summary
+
+| Rule                  | Value                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Task identity, semantic contracts, target derivation, runtime transitions, scoring declarations               |
+| **Must not own**      | Model architecture; controller implementation; training loops; metric formulas; rollout scheduling            |
+| **Public API**        | `TaskKey`, `TaskSpec`, `TaskRuntime`, `TaskScoringSpec`, `TaskStepEvaluator` (legacy)                         |
+| **Allowed imports**   | `contracts`, `types`, `numpy`, `torch`                                                                        |
+| **Forbidden imports** | `models`, `controllers`, `objectives`, `metrics`, `rollouts`, `training`, `lightning`, `reporting`, `figures` |
+| **Layer**             | L1 — Domain Primitives                                                                                        |
+| **Key invariant**     | Tasks define what the problem is; they never know how a model solves it                                       |
+
 ## 1. Architectural position
 
 ```
-ehc_sn.contracts                    (cross-package protocols, runtime DTOs)
+ehp_sn.contracts                    (cross-package protocols — TaskRuntime, etc.)
         ^
-ehc_sn.tasks                        (this package — task-domain semantics)
+ehp_sn.tasks                        (this package — task-domain semantics, L1)
         ^
-        ├── ehc_sn.adapters         (task→model translation)
-        ├── ehc_sn.objectives       (differentiable scoring against targets)
-        ├── ehc_sn.metrics          (stateful measurement)
-        ├── ehc_sn.evaluation       (benchmark orchestration)
-        ├── ehc_sn.rollouts         (temporal execution)
-        └── ehc_sn.controllers      (control transitions)
+        ├── ehp_sn.adapters         (L2 — task→model translation)
+        ├── ehp_sn.objectives       (L2 — differentiable scoring against targets)
+        ├── ehp_sn.metrics          (L1 — stateful measurement; tasks declare scoring specs)
+        ├── ehp_sn.evaluation       (L5 — benchmark orchestration)
+        ├── ehp_sn.rollouts         (L3 — temporal execution consumes TaskRuntime)
+        └── ehp_sn.controllers      (L2 — control transitions consume TaskRuntime)
 ```
 
 ### 1.1 Dependency rules
 
-`ehc_sn.tasks` shared core may depend on:
+`ehp_sn.tasks` shared core may depend on:
 
 | Dependency          | Rationale                             |
 | ------------------- | ------------------------------------- |
 | Python standard lib | —                                     |
 | `numpy`             | Corpus builder and oracle math        |
 | `torch`             | Tensor-valued contracts and schemas   |
-| `ehc_sn.types`      | Shared type aliases (`Batch`)         |
-| `ehc_sn.contracts`  | Cross-package protocols (lightweight) |
+| `ehp_sn.types`      | Shared type aliases (`Batch`)         |
+| `ehp_sn.contracts`  | Cross-package protocols (lightweight) |
 
-`ehc_sn.tasks` shared core must **not** depend on:
+`ehp_sn.tasks` shared core must **not** depend on:
 
 | Forbidden dependency | Rationale                                   |
 | -------------------- | ------------------------------------------- |
-| `ehc_sn.models`      | Tasks must be model-agnostic                |
-| `ehc_sn.controllers` | Controllers consume tasks, not vice versa   |
-| `ehc_sn.objectives`  | Objectives consume task targets             |
-| `ehc_sn.metrics`     | Metrics measure task results (see §2.1)     |
-| `ehc_sn.rollouts`    | Rollouts consume task runtimes              |
-| `ehc_sn.training`    | Training imports targets, not task identity |
-| `ehc_sn.reporting`   | Reporting consumes evaluated results        |
-| `ehc_sn.figures`     | Figures consume evaluated results           |
+| `ehp_sn.models`      | Tasks must be model-agnostic                |
+| `ehp_sn.controllers` | Controllers consume tasks, not vice versa   |
+| `ehp_sn.objectives`  | Objectives consume task targets             |
+| `ehp_sn.metrics`     | Metrics measure task results (see §2.1)     |
+| `ehp_sn.rollouts`    | Rollouts consume task runtimes              |
+| `ehp_sn.training`    | Training imports targets, not task identity |
+| `ehp_sn.reporting`   | Reporting consumes evaluated results        |
+| `ehp_sn.figures`     | Figures consume evaluated results           |
 | `lightning`          | Lightning is a training-layer concern       |
 | `mlflow`             | Experiment tracking is infrastructure       |
 
@@ -63,17 +82,17 @@ Per-family integration modules may depend outward in controlled ways:
 
 | Module         | May depend on                    |
 | -------------- | -------------------------------- |
-| `builder.py`   | `ehc_sn.data` (corpus I/O)       |
-| `providers.py` | `ehc_sn.eval.contracts`          |
-| `traces.py`    | `ehc_sn.traces` contracts        |
-| `runtime.py`   | `ehc_sn.contracts` (TaskRuntime) |
+| `builder.py`   | `ehp_sn.data` (corpus I/O)       |
+| `providers.py` | `ehp_sn.evaluation.contracts`    |
+| `traces.py`    | `ehp_sn.traces` contracts        |
+| `runtime.py`   | `ehp_sn.contracts` (TaskRuntime) |
 
 These are integration boundaries, not core task semantics.
 
 ### 1.2 Task identity namespace
 
 The stable task namespace is **`ehp`** — the project's intended branding —
-not the current Python import namespace `ehc_sn`. A task key should survive
+not the current Python import namespace `ehp_sn`. A task key should survive
 package renaming:
 
 ```python
@@ -83,7 +102,7 @@ ARENA_KEY = TaskKey(namespace="ehp", family="arena", variant="structural")
 while imports remain:
 
 ```python
-from ehc_sn.tasks import ...
+from ehp_sn.tasks import ...
 ```
 
 ### 1.3 Relationship to existing contracts
@@ -144,13 +163,13 @@ What is needed but missing:
 
 ### 2.1 Scoring metadata placement
 
-`MetricSpec` and `TaskScoringSpec` currently live in `ehc_sn.metrics.spec`.
+`MetricSpec` and `TaskScoringSpec` currently live in `ehp_sn.metrics.spec`.
 They are declarative DTOs with no metric implementation dependency — no
 stateful accumulation, no distributed reduction. This makes them lightweight
 enough to live in a neutral contracts location:
 
 ```
-ehc_sn.contracts.scoring
+ehp_sn.contracts.scoring
 ```
 
 This is the recommended home. Alternatively, if the declarative DTOs are kept
@@ -163,7 +182,7 @@ in `metrics`, task scoring declarations should reference them through
 ## 3. Top-level package structure
 
 ```
-src/ehc_sn/tasks/
+src/ehp_sn/tasks/
 ├── __init__.py         ← Public API — minimal stable surface
 ├── identity.py         ← TaskKey, TaskMode, TaskTrait
 ├── specs.py            ← TaskSpec — immutable metadata
@@ -292,10 +311,10 @@ are deferred until a concrete consumer justifies them.
 Per-family example:
 
 ```python
-# ehc_sn/tasks/goaltrace/spec.py
+# ehp_sn/tasks/goaltrace/spec.py
 
-from ehc_sn.tasks.identity import TaskKey, TaskMode, TaskTrait
-from ehc_sn.tasks.specs import TaskSpec
+from ehp_sn.tasks.identity import TaskKey, TaskMode, TaskTrait
+from ehp_sn.tasks.specs import TaskSpec
 
 GOALTRACE_KEY = TaskKey(namespace="ehp", family="goaltrace")
 
@@ -317,10 +336,10 @@ The recommended home is a neutral contracts module so neither `tasks`
 nor `metrics` imports the other:
 
 ```
-ehc_sn.contracts.scoring
+ehp_sn.contracts.scoring
 ```
 
-If kept in `ehc_sn.metrics.spec`, task modules should reference them
+If kept in `ehp_sn.metrics.spec`, task modules should reference them
 indirectly. The canonical aggregation lives in `scoring.py` as a migration
 bridge:
 
@@ -428,11 +447,11 @@ for a research repository where all tasks are internal and statically known:
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from ehc_sn.tasks.arena.spec import ARENA_KEY, ARENA_SPEC
-from ehc_sn.tasks.goaltrace.spec import GOALTRACE_KEY, GOALTRACE_SPEC
-from ehc_sn.tasks.mazehard.spec import MAZEHARD_KEY, MAZEHARD_SPEC
-from ehc_sn.tasks.routebind.spec import ROUTEBIND_KEY, ROUTEBIND_SPEC
-from ehc_sn.tasks.seqmaze.spec import SEQMAZE_KEY, SEQMAZE_SPEC
+from ehp_sn.tasks.arena.spec import ARENA_KEY, ARENA_SPEC
+from ehp_sn.tasks.goaltrace.spec import GOALTRACE_KEY, GOALTRACE_SPEC
+from ehp_sn.tasks.mazehard.spec import MAZEHARD_KEY, MAZEHARD_SPEC
+from ehp_sn.tasks.routebind.spec import ROUTEBIND_KEY, ROUTEBIND_SPEC
+from ehp_sn.tasks.seqmaze.spec import SEQMAZE_KEY, SEQMAZE_SPEC
 
 
 _TASK_SPECS: dict[TaskKey, TaskSpec] = {
@@ -667,8 +686,8 @@ seqmaze/
 ```
 
 `SeqMazeRuntime` may continue implementing `TaskRuntime`, but the imported
-`ValidationRuntimeConfig` must not come from `ehc_sn.training`. Move it to
-`ehc_sn.contracts` or `ehc_sn.eval`.
+`ValidationRuntimeConfig` must not come from `ehp_sn.training`. Move it to
+`ehp_sn.contracts` or `ehp_sn.evaluation`.
 
 ---
 
@@ -702,7 +721,7 @@ __all__ = [
 Protocols remain available through their submodule:
 
 ```python
-from ehc_sn.tasks.protocols import TaskDefinition, InputProjector, TargetProjector
+from ehp_sn.tasks.protocols import TaskDefinition, InputProjector, TargetProjector
 ```
 
 Registries and factories remain submodule APIs until multiple real consumers
@@ -713,7 +732,7 @@ require them.
 Concrete task APIs are imported from family namespaces:
 
 ```python
-from ehc_sn.tasks.goaltrace import (
+from ehp_sn.tasks.goaltrace import (
     GOALTRACE_SPEC,
     GoalTraceInstance,
     GoalTraceTargets,
@@ -739,7 +758,7 @@ configurable. Separate configuration categories:
 | Corpus builder configuration | Changes how instances are generated     | `builder.py`                  |
 | Runtime configuration        | Changes execution limits or batching    | `runtime.py` or `contracts/`  |
 | Objective configuration      | Changes optimization behavior           | `objectives/`                 |
-| Evaluation configuration     | Changes benchmark selection/aggregation | `eval/`                       |
+| Evaluation configuration     | Changes benchmark selection/aggregation | `evaluation/`                 |
 
 These should not be merged into one universal config per family.
 
@@ -762,9 +781,9 @@ Huber weights or ranking-loss margins belong in objectives, not here.
 
 ### 9.1 `tasks -> training` import
 
-`ValidationRuntimeConfig` must not live in `ehc_sn.training`. Move it to
-`ehc_sn.contracts` (runtime execution configuration), `ehc_sn.eval`
-(evaluation-only limits), or `ehc_sn.controllers` (controller-specific
+`ValidationRuntimeConfig` must not live in `ehp_sn.training`. Move it to
+`ehp_sn.contracts` (runtime execution configuration), `ehp_sn.evaluation`
+(evaluation-only limits), or `ehp_sn.controllers` (controller-specific
 settings).
 
 ### 9.2 `contracts -> controllers` import
@@ -778,7 +797,7 @@ into `contracts`.
 
 Acceptable only if `contracts.task_environment` is explicitly a TorchRL
 integration contract. If `contracts` is meant to be framework-neutral,
-move it to `ehc_sn.adapters.torchrl`.
+move it to `ehp_sn.adapters.torchrl`.
 
 ---
 
@@ -843,18 +862,18 @@ Phase 5 — Schema formalization (when justified)
 | Replay or optional semantics       | `<family>/capabilities/`                      |
 | Evaluation case providers          | `<family>/providers.py` (integration)         |
 | Traces and supplements             | `<family>/traces.py` (integration)            |
-| Datasets, storage, loading         | `ehc_sn.data`                                 |
-| Rollout loops, recurrent unrolling | `ehc_sn.rollouts`                             |
-| Losses, weights, regularization    | `ehc_sn.objectives`                           |
-| Stateful metric computation        | `ehc_sn.metrics`                              |
-| Scoring metadata DTOs              | `ehc_sn.contracts.scoring` (recommended)      |
+| Datasets, storage, loading         | `ehp_sn.data`                                 |
+| Rollout loops, recurrent unrolling | `ehp_sn.rollouts`                             |
+| Losses, weights, regularization    | `ehp_sn.objectives`                           |
+| Stateful metric computation        | `ehp_sn.metrics`                              |
+| Scoring metadata DTOs              | `ehp_sn.contracts.scoring` (recommended)      |
 |                                    | _(owns the MetricSpec/TaskScoringSpec types)_ |
 | Task-native scoring declarations   | `<family>/evaluation.py`                      |
 |                                    | _(owns concrete declarations for that task)_  |
-| Benchmark orchestration            | `ehc_sn.eval`                                 |
-| Controller behavior                | `ehc_sn.controllers`                          |
-| Model computation                  | `ehc_sn.models`                               |
-| Task-model translation             | `ehc_sn.adapters`                             |
+| Benchmark orchestration            | `ehp_sn.evaluation`                           |
+| Controller behavior                | `ehp_sn.controllers`                          |
+| Model computation                  | `ehp_sn.models`                               |
+| Task-model translation             | `ehp_sn.adapters`                             |
 
 The five task families and their canonical identities:
 

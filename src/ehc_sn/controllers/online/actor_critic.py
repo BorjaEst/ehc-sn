@@ -2,11 +2,11 @@
 
 The RL controller owns rollout-state transitions, policy-driven action
 selection, and environment stepping.  It emits one
-:class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
+:class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
 per step.
 
 Neutral actor-critic contracts live in
-:mod:`ehc_sn.controllers.contracts.actor_critic`.  RL-specific pieces kept
+:mod:`ehp_sn.controllers.contracts.actor_critic`.  RL-specific pieces kept
 here: ``RLRolloutState``, ``RLControllerConfig``,
 ``RLController``.
 
@@ -129,7 +129,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         **_: Any,
     ) -> tuple[RLRolloutState[ModelState], QHaltingInteractionRecord]:
         """Advance the controller by one step and emit an
-        :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`.
+        :class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`.
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)

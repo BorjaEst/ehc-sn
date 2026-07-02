@@ -3,11 +3,11 @@
 The ACT binding reads from the objective-owned ACT step output protocol
 (``ACTStepOutput.task``).
 The hybrid RL binding reads task-specific fields from
-:class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord` for
+:class:`~ehp_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord` for
 the value-control path.
 
 Mirrors the pattern used by
-:class:`~ehc_sn.adapters.arena.tem.objectives.ArenaTEMTaskBinding`
+:class:`~ehp_sn.adapters.arena.tem.objectives.ArenaTEMTaskBinding`
 for the Arena+TEM family.
 """
 
@@ -114,13 +114,13 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
 class MazeHardHRMV2HybridTaskBinding:
     """MazeHard-specific extraction for the hybrid RL value-control batch path.
 
-    Implements :class:`~ehc_sn.objectives.hybrid_rl.HybridValueObjectiveBinding`
+    Implements :class:`~ehp_sn.objectives.hybrid_rl.HybridValueObjectiveBinding`
     for the HRM v2 + MazeHard pairing.  Extracts token logits from the
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
 
-    Injected into :class:`~ehc_sn.training.q_halting.TD0ActorCriticBatchBuilder`
-    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`
+    Injected into :class:`~ehp_sn.training.q_halting.TD0ActorCriticBatchBuilder`
+    and :class:`~ehp_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`
     at wiring time in the Lightning module.
     """
 
@@ -315,13 +315,13 @@ class _HasSeqMazePathLogits(Protocol):
 class SeqMazeHRMV2HybridTaskBinding:
     """SeqMaze-specific extraction for the hybrid RL value-control batch path.
 
-    Implements :class:`~ehc_sn.objectives.hybrid_rl.HybridValueObjectiveBinding`
+    Implements :class:`~ehp_sn.objectives.hybrid_rl.HybridValueObjectiveBinding`
     for the HRM v2 + SeqMaze pairing.  Extracts path logits from the
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
 
-    Injected into :class:`~ehc_sn.training.q_halting.TD0ActorCriticBatchBuilder`
-    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`
+    Injected into :class:`~ehp_sn.training.q_halting.TD0ActorCriticBatchBuilder`
+    and :class:`~ehp_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`
     at wiring time in the Lightning module.
     """
 
@@ -393,7 +393,7 @@ class SeqMazeHRMV2HybridTaskBinding:
 class GoaltraceHRMV1ACTTaskBinding(ContinuousFieldObjectiveBinding):
     """ACT task binding for Goaltrace field prediction via HRM v1.
 
-    Implements :class:`~ehc_sn.objectives.continuous_field.ContinuousFieldObjectiveBinding`
+    Implements :class:`~ehp_sn.objectives.continuous_field.ContinuousFieldObjectiveBinding`
     by reading ``step_output.task.firing_field`` and target data from the
     executed batch.
 

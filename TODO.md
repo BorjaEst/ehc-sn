@@ -4,8 +4,8 @@
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/lightning/modules/variational_replay.py` lines 501–515
-(post-chunk hook) and `src/ehc_sn/modules/hpc/modules.py` line 154
+**Location:** `src/ehp_sn/lightning/modules/variational_replay.py` lines 501–515
+(post-chunk hook) and `src/ehp_sn/modules/hpc/modules.py` line 154
 (`finalize_memory`).
 
 **Problem:** HPC Hebbian memory matrices are hard-clamped to `[clamp_min,
@@ -40,10 +40,10 @@ post-chunk hook entirely once the per-step bound is in place.
 
 **Location:**
 
-- `src/ehc_sn/modules/pfc/__init__.py` lines 340–345 (`prefix_bias` on CLS token, currently unused by adapters)
-- `src/ehc_sn/adapters/hrm/_base.py` lines 55–130 (token encoder, no instance-level conditioning)
-- `src/ehc_sn/adapters/hrm/mazehard.py` lines 65–70 (`_make_input_v1` always passes `prefix_bias=None`)
-- `src/ehc_sn/modules/hpc/query_policy.py` (cue-family retrieval operators)
+- `src/ehp_sn/modules/pfc/__init__.py` lines 340–345 (`prefix_bias` on CLS token, currently unused by adapters)
+- `src/ehp_sn/adapters/hrm/_base.py` lines 55–130 (token encoder, no instance-level conditioning)
+- `src/ehp_sn/adapters/hrm/mazehard.py` lines 65–70 (`_make_input_v1` always passes `prefix_bias=None`)
+- `src/ehp_sn/modules/hpc/query_policy.py` (cue-family retrieval operators)
 - Legacy reference: `legacy_hrm/models/hrm/hrm_act_v1.py` lines 140–160 (puzzle embedding prepend)
 
 **Problem:** Legacy HRM uses per-instance puzzle embeddings (a learned lookup
@@ -77,7 +77,7 @@ prefrontal working memory) and generalizes to unseen instances at test time.
 **Acceptance criteria:**
 
 - `prefix_bias` is populated by HPC retrieval in at least one HRM adapter (mazehard).
-- `grep -rn "prefix_bias=None" src/ehc_sn/adapters/` returns zero matches for the adapted task.
+- `grep -rn "prefix_bias=None" src/ehp_sn/adapters/` returns zero matches for the adapted task.
 - Mazehard training with HPC context matches or exceeds baseline (no prefix_bias) on sequence-exact accuracy.
 - The mechanism uses content-addressable retrieval, not instance-ID lookup (no embedding table keyed by puzzle index).
 
@@ -87,8 +87,8 @@ prefrontal working memory) and generalizes to unseen instances at test time.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/models/tem/tem_v1.py` class `TEMModelV1`,
-`src/ehc_sn/models/tem/tem_v2.py` class `TEMModelV2`.
+**Location:** `src/ehp_sn/models/tem/tem_v1.py` class `TEMModelV1`,
+`src/ehp_sn/models/tem/tem_v2.py` class `TEMModelV2`.
 
 **Problem:** Trace fields that need model activations (e.g. `diagnostic/mec/location_mean`,
 `diagnostic/hpc/memory`) declare `requires_model_state=True`, which causes the runner to
@@ -114,7 +114,7 @@ internals. Calling with `frozenset()` returns `{}`.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/models/hrm/` (HRM model classes).
+**Location:** `src/ehp_sn/models/hrm/` (HRM model classes).
 
 **Problem:** Same as TEM — HRM trace fields (`pfc/z_H`, `pfc/z_L`) use
 `requires_model_state=True`, triggering full-state cloning.
@@ -135,10 +135,10 @@ model classes. Supported view keys: `"pfc.z_H"`, `"pfc.z_L"`. Returns detached t
 
 **Location:**
 
-- `src/ehc_sn/traces/observer.py` — `TraceField` dataclass.
-- `src/ehc_sn/traces/specs.py` — all `TEM_TRACE_FIELDS`, `HRM_HIDDEN_STATE_FIELDS`, and
+- `src/ehp_sn/traces/observer.py` — `TraceField` dataclass.
+- `src/ehp_sn/traces/specs.py` — all `TEM_TRACE_FIELDS`, `HRM_HIDDEN_STATE_FIELDS`, and
   `build_trace_spec`.
-- `src/ehc_sn/eval/executor.py` — `_trace_request_needs_model_state`.
+- `src/ehp_sn/evaluation/executor.py` — `_trace_request_needs_model_state`.
 
 **Problem:** `TraceField.requires_model_state` is a binary flag. When any field sets it,
 the entire `model_state` is cloned into `CarrySnapshot`. There is no way to declare
@@ -153,7 +153,7 @@ Update `_trace_request_needs_model_state` in `executor.py` to use `dependencies`
 
 **Acceptance criteria:**
 
-- `grep -rn "requires_model_state=True" src/ehc_sn/traces/specs.py` returns zero matches.
+- `grep -rn "requires_model_state=True" src/ehp_sn/traces/specs.py` returns zero matches.
 - `TraceSpec.resolved_dependencies()` returns the correct union for each paradigm.
 - `_trace_request_needs_model_state` checks `dependencies`, not `requires_model_state`.
 
@@ -163,11 +163,11 @@ Update `_trace_request_needs_model_state` in `executor.py` to use `dependencies`
 
 **Location:**
 
-- `src/ehc_sn/rollouts/runtime.py` — `Runner.run()`, `_snapshot_carry()`, `CarrySnapshot`,
+- `src/ehp_sn/rollouts/runtime.py` — `Runner.run()`, `_snapshot_carry()`, `CarrySnapshot`,
   `SingleStepRunner`, `RecurrentRunner`.
-- `src/ehc_sn/eval/executor.py` — `execute_replay_evaluation_batch`.
-- `src/ehc_sn/lightning/modules/act_supervised.py` — passes `snapshot_model_state=True`.
-- `src/ehc_sn/training/rollout.py` — passes `snapshot_model_state=False`.
+- `src/ehp_sn/evaluation/executor.py` — `execute_replay_evaluation_batch`.
+- `src/ehp_sn/lightning/modules/act_supervised.py` — passes `snapshot_model_state=True`.
+- `src/ehp_sn/training/rollout.py` — passes `snapshot_model_state=False`.
 
 **Problem:** The `snapshot_model_state` parameter controls whether `_snapshot_carry`
 clones the entire `model_state` tree. With view-based extraction, this is no longer
@@ -193,15 +193,15 @@ remove the parameter from `execute_replay_evaluation_batch`, `act_supervised.py`
 
 **Location:**
 
-- `src/ehc_sn/traces/observer.py` — `TraceObserver.observe()`.
-- `src/ehc_sn/traces/specs.py` — trace field getter callables.
-- `src/ehc_sn/eval/executor.py` — per-step observer closure.
+- `src/ehp_sn/traces/observer.py` — `TraceObserver.observe()`.
+- `src/ehp_sn/traces/specs.py` — trace field getter callables.
+- `src/ehp_sn/evaluation/executor.py` — per-step observer closure.
 
 **Problem:** `TraceField.get` callables receive the full `StepRecord` and access
 `ctx.carry.model_state.mec.cells` etc. via `_TEMTraceContext` / `_HRMTraceContext`
 protocols. After removing `CarrySnapshot.model_state`, these access paths are dead.
 
-**Fix:** Define a `StepContext` dataclass in `traces/observer.py` (or `eval/contracts.py`):
+**Fix:** Define a `StepContext` dataclass in `traces/observer.py` (or `evaluation/contracts.py`):
 `(index: int, record: StepRecord, views: dict[str, Tensor])`. Update
 `TraceObserver.observe()` to accept `StepContext` and pass `ctx.views` to field getters.
 Rewrite all trace field getter callables in `specs.py` to read from `ctx.views` instead
@@ -209,8 +209,8 @@ of `ctx.carry.model_state.*`. Remove the `_TEMTraceContext` / `_HRMTraceContext`
 
 **Acceptance criteria:**
 
-- `grep -rn "ctx.carry.model_state" src/ehc_sn/traces/specs.py` returns zero matches.
-- `grep -rn "_TEMTraceContext\|_HRMTraceContext" src/ehc_sn/traces/specs.py` returns
+- `grep -rn "ctx.carry.model_state" src/ehp_sn/traces/specs.py` returns zero matches.
+- `grep -rn "_TEMTraceContext\|_HRMTraceContext" src/ehp_sn/traces/specs.py` returns
   zero matches (or they are repurposed to use `views`).
 - Existing trace field keys produce identical extracted values.
 
@@ -218,7 +218,7 @@ of `ctx.carry.model_state.*`. Remove the `_TEMTraceContext` / `_HRMTraceContext`
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/executor.py` — `execute_replay_evaluation_batch`.
+**Location:** `src/ehp_sn/evaluation/executor.py` — `execute_replay_evaluation_batch`.
 
 **Problem:** The executor currently decides `snapshot_model_state` based on
 `_trace_request_needs_model_state` and passes it to the runner. Views must instead be
@@ -238,17 +238,17 @@ accumulators. Remove the `snapshot_model_state` logic entirely.
 
 ## Phase 2 — Online Accumulators
 
-### eval-consumer-protocols
+### evaluation-consumer-protocols
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/contracts.py` (new protocols).
+**Location:** `src/ehp_sn/evaluation/contracts.py` (new protocols).
 
 **Problem:** No abstraction exists for step-consuming evidence products other than
 `TraceSink`. Spatial rate maps, grid scores, and place-field statistics are computed
 post-hoc from full temporal traces loaded into memory.
 
-**Fix:** Define two protocols in `eval/contracts.py`:
+**Fix:** Define two protocols in `evaluation/contracts.py`:
 
 - `EvaluationConsumer`: `name: str`, `required_views: frozenset[str]`,
   `update(context: StepContext) -> None`, `close() -> None`.
@@ -258,7 +258,7 @@ post-hoc from full temporal traces loaded into memory.
 
 **Acceptance criteria:**
 
-- Protocols are importable from `ehc_sn.eval.contracts`.
+- Protocols are importable from `ehp_sn.evaluation.contracts`.
 - `EvaluationConsumer` is runtime-checkable.
 - `MergeableAccumulator` inherits from `EvaluationConsumer`.
 
@@ -266,7 +266,7 @@ post-hoc from full temporal traces loaded into memory.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/analysis/spatial/accumulators.py` (new file).
+**Location:** `src/ehp_sn/analysis/spatial/accumulators.py` (new file).
 
 **Problem:** MEC and HPC spatial firing-rate maps are computed by loading the full
 `diagnostic/mec/location_mean` trace `(T, U)` into memory, then aggregating per
@@ -295,7 +295,7 @@ visited_mask: [H, W]}`.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/analysis/spatial/accumulators.py`.
+**Location:** `src/ehp_sn/analysis/spatial/accumulators.py`.
 
 **Problem:** Grid scores and autocorrelograms are computed from full rate maps loaded
 post-hoc. No online accumulator exists for these derived spatial statistics.
@@ -317,7 +317,7 @@ maps (output of `SpatialRateMapMetric.compute()`) in its `update()`, or implemen
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/accumulators.py` (new file).
+**Location:** `src/ehp_sn/evaluation/accumulators.py` (new file).
 
 **Problem:** Spatial maps must often be grouped by environment or case. Embedding grouping
 logic into each accumulator duplicates code and mixes concerns.
@@ -341,7 +341,7 @@ logic into each accumulator duplicates code and mixes concerns.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/executor.py` — `execute_replay_evaluation_batch`.
+**Location:** `src/ehp_sn/evaluation/executor.py` — `execute_replay_evaluation_batch`.
 
 **Problem:** The executor currently only supports `TraceSink` for step consumption.
 
@@ -382,7 +382,7 @@ for stable v3 API support. Verify import after install.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/traces/sink.py`.
+**Location:** `src/ehp_sn/traces/sink.py`.
 
 **Problem:** `InMemoryTraceSink` accumulates all step payloads in RAM via `TraceTree`.
 No disk-backed, chunked alternative exists.
@@ -408,7 +408,7 @@ No disk-backed, chunked alternative exists.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/artifacts.py`.
+**Location:** `src/ehp_sn/evaluation/artifacts.py`.
 
 **Problem:** Accumulator outputs (`activation_sum`, `occupancy`, `rate_map`,
 `autocorrelation`, `grid_scores`) need a persistence format that supports chunked
@@ -435,7 +435,7 @@ partial reads and compression.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/artifacts.py` — `collect_regime_artifact_bundle` and
+**Location:** `src/ehp_sn/evaluation/artifacts.py` — `collect_regime_artifact_bundle` and
 manifest schema.
 
 **Problem:** The manifest JSON records traces as `.npz` paths and metadata keys. Zarr
@@ -463,19 +463,19 @@ compressor: str}]}`. Update `collect_regime_artifact_bundle()` to call
 **Problem:** `pyarrow` (for Parquet) and `mlflow` are not declared as dependencies.
 
 **Fix:** Add `"pyarrow"` and `"mlflow"` to `[project.optional-dependencies]` under a new
-`eval` extras group: `eval = ["pyarrow", "mlflow", "zarr"]`. Keep them optional so core
+`evaluation` extras group: `evaluation = ["pyarrow", "mlflow", "zarr"]`. Keep them optional so core
 library evaluation does not require MLflow or Parquet.
 
 **Acceptance criteria:**
 
-- `pip install -e ".[eval]"` installs `pyarrow`, `mlflow`, and `zarr`.
-- Core evaluation (`run_eval.py`) works without these packages when not using `--mlflow`.
+- `pip install -e ".[evaluation]"` installs `pyarrow`, `mlflow`, and `zarr`.
+- Core evaluation (alias scripts) works without these packages when not using MLflow.
 
 ### parquet-metrics-writer
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/artifacts.py`.
+**Location:** `src/ehp_sn/evaluation/artifacts.py`.
 
 **Problem:** Per-case scalar metrics and per-unit spatial statistics are embedded in
 manifest JSON or kept only in memory.
@@ -500,12 +500,12 @@ peak_rate, field_area, ...)`.
 
 **Status:** not-started
 
-**Location:** `scripts/evaluation/run_eval.py` (or new `scripts/evaluation/mlflow_register.py`).
+**Location:** `scripts/evaluation/_cli.py` (or new `scripts/evaluation/mlflow_register.py`).
 
 **Problem:** Evaluation runs have no experiment-tracking catalog. Provenance is only in
 `manifest.json` within the artifact directory.
 
-**Fix:** Add `--mlflow` flag and `--mlflow-experiment` option to `run_eval.py`. When set:
+**Fix:** Add `--mlflow` flag and `--mlflow-experiment` option to the shared CLI factory in `_cli.py`. When set:
 
 - Read `manifest.json`.
 - Start MLflow run with `run_name=evaluation_id`.
@@ -521,7 +521,7 @@ evaluation artifact directory.
 
 **Acceptance criteria:**
 
-- `python scripts/evaluation/run_eval.py run ... --mlflow` registers the run without
+- `python scripts/evaluation/arena/tem_v1.py run ... --mlflow` registers the run without
   errors.
 - MLflow UI shows parameters, metrics, and artifact links for the registered run.
 - Omitting `--mlflow` produces identical evaluation artifacts as before (no regression).
@@ -532,7 +532,7 @@ evaluation artifact directory.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/traces/sink.py` (or `src/ehc_sn/eval/contracts.py`).
+**Location:** `src/ehp_sn/traces/sink.py` (or `src/ehp_sn/evaluation/contracts.py`).
 
 **Problem:** Sparse events (halt, memory write, retrieval failure, NaN detection,
 incorrect prediction) are currently captured as dense per-step trace fields or not at
@@ -551,7 +551,7 @@ all.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/traces/sink.py`.
+**Location:** `src/ehp_sn/traces/sink.py`.
 
 **Problem:** No concrete event sink exists for sparse event persistence.
 
@@ -570,7 +570,7 @@ append mode or batched writes.
 
 **Status:** not-started
 
-**Location:** `src/ehc_sn/eval/contracts.py` or `src/ehc_sn/traces/specs.py`.
+**Location:** `src/ehp_sn/evaluation/contracts.py` or `src/ehp_sn/traces/specs.py`.
 
 **Problem:** No mechanism exists to estimate or enforce trace memory budgets before
 evaluation starts. Memory exhaustion is a runtime crash, not a validated configuration
@@ -588,3 +588,11 @@ integration into the evaluation pipeline.
 - `TraceBudgetExceeded` is raised with actionable suggestions when a plan exceeds budget.
 - Estimate is within ±20% of actual memory usage for a representative TEM Arena config.
 - `validate_budget` is a pure function with no side effects.
+
+---
+
+## Add cli for task and remove scripts/data-gen
+
+---
+
+## Add cli for training and remove scripts/training

@@ -73,6 +73,15 @@ class RateMapStats:
     """Area (world units²) of bins exceeding ``threshold_fraction × peak_rate``.
     ``NaN`` when the cell is not sufficiently spatially informative."""
 
+    field_mask: NDArray[np.bool_]
+    """Boolean mask of bins above field threshold, shape ``(height, width)``.
+    ``True`` where ``rate_map >= field_threshold_fraction × peak_rate`` AND
+    the bin was visited.  All-``False`` for silent or non-informative cells."""
+
+    coverage: float
+    """Fraction of visited bins belonging to the field (``[0, 1]``).
+    ``NaN`` for silent or non-informative cells."""
+
 
 # =============================================================================
 # Public API
@@ -118,6 +127,7 @@ def compute_rate_map_stats(
     """
     # ── Guard: empty or all-NaN rate map ────────────────────────────────────
     if rate_map.size == 0 or not np.isfinite(rate_map).any():
+        empty_mask = np.zeros(rate_map.shape, dtype=bool)
         return RateMapStats(
             peak_rate=float("nan"),
             mean_rate=float("nan"),
@@ -126,6 +136,8 @@ def compute_rate_map_stats(
             field_x=float("nan"),
             field_y=float("nan"),
             field_area=float("nan"),
+            field_mask=empty_mask,
+            coverage=float("nan"),
         )
 
     rate_map = np.asarray(rate_map, dtype=float)
@@ -134,6 +146,7 @@ def compute_rate_map_stats(
     # ── Visited bins ────────────────────────────────────────────────────────
     visited = np.isfinite(rate_map) & (occupancy > 0)
     if not visited.any():
+        empty_mask = np.zeros(rate_map.shape, dtype=bool)
         return RateMapStats(
             peak_rate=float("nan"),
             mean_rate=float("nan"),
@@ -142,6 +155,8 @@ def compute_rate_map_stats(
             field_x=float("nan"),
             field_y=float("nan"),
             field_area=float("nan"),
+            field_mask=empty_mask,
+            coverage=float("nan"),
         )
 
     r = rate_map[visited]
@@ -153,6 +168,7 @@ def compute_rate_map_stats(
     # ── Peak rate ───────────────────────────────────────────────────────────
     peak_rate = float(np.nanmax(rate_map))
     if peak_rate <= 0:
+        empty_mask = np.zeros(rate_map.shape, dtype=bool)
         return RateMapStats(
             peak_rate=0.0,
             mean_rate=0.0,
@@ -161,6 +177,8 @@ def compute_rate_map_stats(
             field_x=float("nan"),
             field_y=float("nan"),
             field_area=float("nan"),
+            field_mask=empty_mask,
+            coverage=float("nan"),
         )
 
     # ── Mean rate (occupancy-weighted) ──────────────────────────────────────
@@ -187,6 +205,9 @@ def compute_rate_map_stats(
         not np.isfinite(spatial_information)
         or spatial_information < min_spatial_information_for_field
     ):
+        visited_bin_count = int(np.sum(visited))
+        coverage_val = float("nan")
+        empty_mask = np.zeros(rate_map.shape, dtype=bool)
         return RateMapStats(
             peak_rate=peak_rate,
             mean_rate=mean_rate,
@@ -195,6 +216,8 @@ def compute_rate_map_stats(
             field_x=float("nan"),
             field_y=float("nan"),
             field_area=float("nan"),
+            field_mask=empty_mask,
+            coverage=coverage_val,
         )
 
     # Peak location in world coordinates.
@@ -206,12 +229,19 @@ def compute_rate_map_stats(
     field_x = float(xs[x_idx])
     field_y = float(ys[y_idx])
 
-    # Field area: bins above threshold_fraction × peak_rate.
+    # Field mask and coverage.
     threshold = field_threshold_fraction * peak_rate
-    field_mask = rate_map >= threshold
-    active_bin_count = int(np.sum(field_mask & visited))
+    field_mask_bool = (rate_map >= threshold) & visited
+    field_mask = field_mask_bool & visited
+    active_bin_count = int(np.sum(field_mask))
+    visited_bin_count = int(np.sum(visited))
     bin_area = geometry.bin_size_x * geometry.bin_size_y
     field_area = float(active_bin_count * bin_area)
+    coverage_val = (
+        float(active_bin_count / visited_bin_count)
+        if visited_bin_count > 0
+        else float("nan")
+    )
 
     return RateMapStats(
         peak_rate=peak_rate,
@@ -221,4 +251,6 @@ def compute_rate_map_stats(
         field_x=field_x,
         field_y=field_y,
         field_area=field_area,
+        field_mask=field_mask,
+        coverage=coverage_val,
     )

@@ -1,6 +1,6 @@
 """Task-owned evaluation case providers for the Routebind task family.
 
-These providers implement :class:`~ehc_sn.eval.contracts.EvaluationSourceProvider`
+These providers implement :class:`~ehp_sn.evaluation.contracts.EvaluationSourceProvider`
 and supply batched Routebind replay cases to named evaluation regimes.
 
 Ownership rules:
@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
-from ehc_sn.eval.contracts import EvaluationCaseBatch
+from ehc_sn.evaluation.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.routebind.traces import RoutebindEvaluationSourceContext
 
 
@@ -80,7 +80,7 @@ class RoutebindReplayProvider:
                 across batches).  ``max_batches`` takes precedence.
 
         Yields:
-            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehp_sn.evaluation.contracts.EvaluationCaseBatch` items with
             task-native batches, a deterministic ``case_id``, and split metadata.
         """
         data_root = self._dataset_path

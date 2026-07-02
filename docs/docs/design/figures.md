@@ -3,12 +3,44 @@ title: Figures Design Contract
 description: Domain kernel for ehp-sn figures — views, builders, renderers, registry, export, and diagnostics
 ---
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 # Figures Design Contract (`ehp_sn.figures`)
 
 > A deterministic visualization layer over already-computed data. The
 > figures package converts typed analysis results into renderable
 > Matplotlib figures without owning evaluation, aggregation, experiment
 > tracking, or artifact discovery.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Owns**              | Figure definitions, views, builders, renderers; `FigureId`, `FigureStyle`, `FigureResult`; visual encoding; export |
+| **Must not own**      | Scientific computation (gridness, place fields); trace loading; artifact paths; MLflow clients; GPU tensors        |
+| **Public API**        | `render`, `REGISTRY`, `FigureContext`, `FigureSpec`, `FigureResult`, `FigureStyle`, `list_figures`                 |
+| **Allowed imports**   | `analysis` (contracts/view models only), `contracts`, `types`, `matplotlib`                                        |
+| **Forbidden imports** | `traces.trace_tree` (use `TraceReader` protocol), `evaluation`, `training`, `lightning`, `tasks`, `models`         |
+| **Layer**             | L6 — Post-Processing & Presentation                                                                                |
+| **API verified**      | 🔴 Known gap: imports `TraceTree` directly, violating DEP-04                                                       |
+
+### Transitional exceptions
+
+**`TraceTree` import**: The current implementation imports `TraceTree` from
+`traces.trace_tree`. `TraceTree` implements the `TraceReader` protocol. The
+resolution is to import `TraceReader` from `traces/` (allowed) and use the
+protocol interface, rather than depending on the concrete `TraceTree` type.
+All trace consumers (figures, analysis, diagnostics) should depend on
+`TraceReader`, not `TraceTree`. Once migrated, DEP-04 will be resolved.
+
+---
 
 The core rule:
 

@@ -20,6 +20,18 @@ import numpy as np
 import torch
 from torch import Tensor
 
+# =============================================================================
+# JSON-compatible value type
+# =============================================================================
+
+JsonValue: TypeAlias = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
+"""Type alias for JSON-serializable values.
+
+Recursive — lists and dicts may contain further ``JsonValue`` instances.
+Used by ``ProducedArtifact.metadata`` and artifact manifest payloads.
+"""
 Device = torch.device
 """Canonical device type alias (``torch.device``)."""
 
@@ -62,6 +74,247 @@ Structure:
     - Length: `n_freq` (one element per frequency module)
     - Each element: tensor of shape `(B, n_cells_f)`
 """
+
+
+@dataclass(frozen=True)
+class ScaleMetadata:
+    """Metadata for one frequency band in a multi-scale representation.
+
+    Attributes:
+        band_name: Stable band identifier (e.g. ``"freq_0"``).
+        feature_dim: Last-dimension size at this scale.
+        index: Ordinal position in the band sequence.
+    """
+
+    band_name: str
+    feature_dim: int
+    index: int
+
+
+@dataclass(frozen=True)
+class MultiScaleView:
+    """Named multi-scale view with per-band metadata.
+
+    Replaces bare ``list[Tensor]`` for multi-scale model observations.
+    Each band is independently typed and named, enabling stable Zarr
+    arrays per band and deterministic figure interpretation.
+    """
+
+    values: dict[str, Tensor]
+    metadata: dict[str, ScaleMetadata]
+
+    def __post_init__(self) -> None:
+        if self.values.keys() != self.metadata.keys():
+            raise ValueError(
+                "MultiScaleView values and metadata must have identical "
+                f"key sets: values={set(self.values.keys())} !="
+                f" metadata={set(self.metadata.keys())}"
+            )
+
+
+# =============================================================================
+# Spatial sufficient statistics
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class SpatialPopulationStatisticsPayload:
+    """Canonical CPU-resident sufficient statistics for one evaluation case.
+
+    Occupancy and activation sums are accumulated on-device and transferred
+    to CPU once on finalization.  All arrays use flattened location indices;
+    ``geometry`` owns conversion to spatial coordinates.
+
+    Shapes:
+        occupancy:         [E, L]       int64
+        activation_sum:    [E, L, U_b]  float64  per band
+        activation_sq_sum: [E, L, U_b]  float64  per band (optional)
+    where E = n_environments, L = n_locations, U_b = n_units at band b.
+
+    ``geometry`` is typed as ``object`` but must be a
+    ``SpatialBinGeometry`` instance at runtime.  The import is deferred
+    to avoid a Layer 1 -> Layer 2 dependency.
+    """
+
+    occupancy: np.ndarray
+    activation_sum: dict[str, np.ndarray]
+    activation_sq_sum: dict[str, np.ndarray] | None
+
+    geometry: object  # SpatialBinGeometry
+    environment_ids: tuple[str, ...]
+    scale_metadata: dict[str, ScaleMetadata]
+
+    valid_step_count: int
+    accumulation_dtype: str
+
+
+# =============================================================================
+# Rate-map materialization
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class RateMapConfig:
+    """Configuration for CPU rate-map materialization from sufficient statistics.
+
+    Attributes:
+        minimum_occupancy: Bins with fewer visits than this threshold are
+            treated as unvisited and receive ``empty_bin_value``.
+        empty_bin_value: Value assigned to unvisited bins.  Default ``NaN``.
+        smoothing_sigma: Standard deviation (in bin units) for optional
+            occupancy-weighted Gaussian smoothing.  ``None`` disables
+            smoothing.  Non-``None`` raises ``NotImplementedError`` until
+            geometry-aware spatial reshape is available.
+        smoothing_mode: Smoothing strategy.  ``"occupancy_weighted"`` is
+            the only valid value and computes ``smooth(sum)/smooth(occ)``.
+        output_dtype: NumPy dtype string for the output rate-map arrays.
+    """
+
+    minimum_occupancy: int = 1
+    empty_bin_value: float = float("nan")
+    smoothing_sigma: float | None = None
+    smoothing_mode: str = "occupancy_weighted"
+    output_dtype: str = "float64"
+
+    def __post_init__(self) -> None:
+        if self.minimum_occupancy < 1:
+            raise ValueError(
+                f"minimum_occupancy must be >= 1, "
+                f"got {self.minimum_occupancy}"
+            )
+        if self.smoothing_mode not in ("occupancy_weighted", "direct"):
+            raise ValueError(
+                f"smoothing_mode must be 'occupancy_weighted' "
+                f"or 'direct', got {self.smoothing_mode!r}"
+            )
+
+
+@dataclass(frozen=True)
+class SpatialRateMapPayload:
+    """Canonical CPU-resident rate maps for one evaluation case.
+
+    Produced by ``compute_rate_maps()`` from
+    ``SpatialPopulationStatisticsPayload``.  Carries full provenance
+    so downstream analyses can inspect normalisation policy.
+
+    Shapes:
+        occupancy:      [E, L]       int64
+        visited_mask:   [E, L]       bool
+        rate_maps[band]: [E, L, U_b]  float64
+    where E = n_environments, L = n_locations, U_b = n_units at band b.
+    """
+
+    rate_maps: dict[str, np.ndarray]
+    occupancy: np.ndarray
+    visited_mask: np.ndarray
+
+    geometry: object  # SpatialBinGeometry
+    environment_ids: tuple[str, ...]
+    scale_metadata: dict[str, ScaleMetadata]
+
+    minimum_occupancy: int
+    empty_bin_value: float
+    smoothing_sigma: float | None
+    source_valid_step_count: int
+
+
+@dataclass(frozen=True)
+class ArrayArtifactReference:
+    """Descriptor for one persisted Zarr array within an artifact group.
+
+    Attributes:
+        path: Relative path within the artifact root to the Zarr array.
+        shape: Full array shape.
+        dtype: NumPy dtype string.
+        chunks: Chunk shape, or ``None`` if unchunked.
+    """
+
+    path: str
+    shape: tuple[int, ...]
+    dtype: str
+    chunks: tuple[int, ...] | None
+
+
+@dataclass(frozen=True)
+class ArtifactReference:
+    """Intra-manifest reference to another analysis artifact.
+
+    Used for provenance linking (e.g. a rate-map artifact referencing its
+    source statistics artifact).
+    """
+
+    artifact_id: str
+    artifact_type: str
+    schema_version: int
+
+
+@dataclass(frozen=True)
+class SpatialGeometryDescriptor:
+    """Serializable spatial geometry metadata.
+
+    Carries enough information to reconstruct a ``SpatialBinGeometry``
+    for rectangular-grid environments.  Extended with ``topology`` for
+    future masked-grid and graph environments.
+    """
+
+    topology: str  # "rectangular"
+    bin_size_x: float
+    bin_size_y: float
+
+
+@dataclass(frozen=True)
+class SpatialPopulationStatisticsArtifact:
+    """Manifest descriptor for a persisted spatial-statistics artifact.
+
+    Contains array references and metadata; does not contain loaded
+    NumPy arrays.  Use ``read_spatial_population_statistics()`` to
+    reconstruct the payload.
+    """
+
+    schema_version: int
+    artifact_type: str  # "spatial_population_statistics"
+    artifact_id: str
+
+    population: str
+    occupancy: ArrayArtifactReference
+    activation_sum: dict[str, ArrayArtifactReference]
+    activation_sq_sum: dict[str, ArrayArtifactReference] | None
+
+    geometry: SpatialGeometryDescriptor
+    environment_ids: tuple[str, ...]
+    scale_metadata: dict[str, object]
+
+    valid_step_count: int
+    accumulation_dtype: str
+
+
+@dataclass(frozen=True)
+class SpatialRateMapArtifact:
+    """Manifest descriptor for a persisted spatial rate-map artifact.
+
+    References the source statistics artifact for provenance.
+    """
+
+    schema_version: int
+    artifact_type: str  # "spatial_rate_maps"
+    artifact_id: str
+
+    rate_maps: dict[str, ArrayArtifactReference]
+    occupancy: ArrayArtifactReference
+    visited_mask: ArrayArtifactReference
+
+    geometry: SpatialGeometryDescriptor
+    environment_ids: tuple[str, ...]
+    scale_metadata: dict[str, object]
+
+    config_minimum_occupancy: int
+    config_empty_bin_policy: str  # "nan", "zero", "masked"
+    config_smoothing_sigma: float | None
+    config_output_dtype: str
+
+    source_statistics: ArtifactReference
+    source_valid_step_count: int
+
 
 AbstractLocation = MultiScaleCode
 """Abstract spatial representation (g) from transition dynamics.

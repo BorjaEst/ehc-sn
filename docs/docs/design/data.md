@@ -3,7 +3,30 @@ title: Data Subsystem
 description: Two-plane architecture for the ehp-sn data subsystem
 ---
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 # Data Subsystem (`ehp_sn.data`)
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Dataset identity (`DatasetRef`, `DatasetLocation`); manifests; indexes; build pipeline; storage backends; sampling; collation; loading |
+| **Must not own**      | Model architecture; task semantics; training loops; evaluation orchestration; metric computation                                       |
+| **Public API**        | `DatasetRef`, `DatasetSelection`, `DatasetLocation`, `open_dataset`, `ProcessedDataset`, `DataLoaderConfig`, `build_data_loader`       |
+| **Allowed imports**   | `contracts`, `types`                                                                                                                   |
+| **Forbidden imports** | `models`, `controllers`, `objectives`, `training`, `lightning`, `evaluation`, `adapters`                                               |
+| **Layer**             | L1 — Domain Primitives                                                                                                                 |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                          |
+
+---
 
 The data subsystem is responsible for **producing, identifying, validating,
 storing, resolving, and reading** canonical dataset representations, and for

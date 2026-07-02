@@ -1,6 +1,29 @@
 # Model Design Contract
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
 > Complete parameterized architectures and their model-local contracts.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Neural architectures (`TEMModelV1`, `HRMModelV1`, …); model state (`init_state`, `reset_state`); typed inputs/outputs; architecture config; `trace_views()` |
+| **Must not own**      | Task adaptation; loss computation; training loops; rollout execution; metric accumulation; checkpoint selection                                             |
+| **Public API**        | `TEMModelV1`, `TEMModelV2`, `HRMModelV1`, `HRMModelV2`, `EHPModelV1`, `build_model`                                                                         |
+| **Allowed imports**   | `modules`, `types`, `contracts`                                                                                                                             |
+| **Forbidden imports** | `controllers`, `objectives`, `training`, `lightning`, `rollouts`, `evaluation`                                                                              |
+| **Layer**             | L2 — Computation                                                                                                                                            |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                                               |
+
+---
 
 An **architecture** defines a parameterized neural computation with a stable
 transition contract:
@@ -898,8 +921,8 @@ is appropriate for optional experiment-level policies.
 
 ```
 models → modules
-models → low-level types (ehc_sn.types)
-models → model-local utilities (ehc_sn.utils.detach)
+models → low-level types (ehp_sn.types)
+models → model-local utilities (ehp_sn.utils.detach)
 ```
 
 ### 15.2 Disallowed imports
@@ -1057,7 +1080,7 @@ ehp_sn.models
 └── ehp/
     ├── EHPModelV1, EHPSettingsV1, EHPInputV1, EHPOutputV1, EHPStateV1
     ├── EHPModelV2, EHPSettingsV2, EHPInputV2, EHPOutputV2, EHPStateV2
-    └── _shared (EHCProjectionSettings, slot constants)
+    └── _shared (EHPProjectionSettings, slot constants)
 ```
 
 ### Canonical usage

@@ -7,7 +7,7 @@ when a reasoning task should receive RL feedback: the controller calls
 reward, termination, truncation, optional metrics, and optional next runtime
 state.
 
-Use :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter` instead
+Use :class:`~ehp_sn.contracts.task_environment.TaskEnvironmentAdapter` instead
 when the task exposes an interactive environment whose observations, rewards,
 and termination arise from stepping external state.
 """
@@ -57,7 +57,7 @@ class TaskStepEvaluator(Protocol):
     This seam owns reward, termination, truncation, optional metrics, and
     optional task runtime-state updates.
 
-    Use :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`
+    Use :class:`~ehp_sn.contracts.task_environment.TaskEnvironmentAdapter`
     together with an ``EnvBase`` implementation for closed-loop online
     environment tasks.
     """

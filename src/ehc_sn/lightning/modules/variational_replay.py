@@ -26,12 +26,13 @@ from ehc_sn.controllers.replay.trajectory import (
 )
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.episode_sources import ShuffledEpisodeSource
-from ehc_sn.eval.contracts import (
+from ehc_sn.evaluation.contracts import (
     EvaluationCaseBatch,
     EvaluationCaseResult,
+    EvaluationConsumer,
     EvaluationTraceRequest,
 )
-from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.evaluation.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.keys import (
@@ -54,7 +55,6 @@ from ehc_sn.metrics.renderers import (
 )
 from ehc_sn.metrics.rollout import (
     make_observed_step_metric_observer,
-    update_metric_collection_from_evaluated_chunk,
 )
 from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.composites.tem import (
@@ -63,17 +63,13 @@ from ehc_sn.objectives.composites.tem import (
     TEMScoringContext,
     TEMScoringInput,
 )
+from ehc_sn.rollouts.materialization import ObservedStep
 from ehc_sn.rollouts.runtime import RecurrentRunner, StepRecord
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource
 from ehc_sn.tasks.arena.runtime import (
     ARENA_REPLAY_REQUIRED_KEYS,
     batch_size_from_arena_batch,
     infer_arena_replay_batch_keys,
-)
-from ehc_sn.tasks.arena.traces import (
-    ArenaEvaluationSourceContext,
-    apply_arena_trace_supplements,
-    build_arena_trace_supplements,
 )
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -276,7 +272,7 @@ class VariationalReplayModule(L.LightningModule):
 
         self._step_routes = TEM_STEP_ROUTES
         self._episode_routes = TEM_EPISODE_ROUTES
-        self._primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
+        self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
 
         self.train_metrics = build_train_metrics(self._step_routes).clone(
             prefix="train/"
@@ -323,7 +319,7 @@ class VariationalReplayModule(L.LightningModule):
         self,
         stage: Optional[str] = None,
     ) -> None:
-        """Initialize phase-local train/eval runtimes."""
+        """Initialize phase-local train/evaluation runtimes."""
         if stage in (None, "fit"):
             self._ensure_train_runtime()
             self._ensure_eval_runtime()
@@ -461,11 +457,18 @@ class VariationalReplayModule(L.LightningModule):
         return self._execution.sequence.tbptt_steps
 
     def _apply_runtime(self, step: int) -> TEMRuntimeState:
-        """Resolve runtime state for the given optimizer step."""
+        """Resolve runtime state for the given optimizer step.
+
+        Returns a fixed evaluation-default state when ``_execution`` is
+        ``None`` (offline evaluation path).  Training paths must pass
+        ``execution=`` to the constructor.
+        """
         if self._execution is None:
-            raise RuntimeError(
-                "execution config is required for TEM training. "
-                "Pass execution= to VariationalReplayModule constructor."
+            return TEMRuntimeState(
+                eta=0.0,
+                hebbian_decay=0.0,
+                p2g_use=1.0,
+                p2g_uncertainty_offset=0.0,
             )
         return resolve_tem_runtime(step, self._execution)
 
@@ -753,9 +756,9 @@ class VariationalReplayModule(L.LightningModule):
                 case_id=f"val-{batch_idx:04d}",
             ),
             trace_request=trace_request,
-        )
-        update_metric_collection_from_evaluated_chunk(
-            self.val_metrics, result.evaluated, self._episode_routes
+            metric_observer=make_observed_step_metric_observer(
+                self.val_metrics, self._episode_routes
+            ),
         )
 
         obs_id = batch.get("observation_id")
@@ -831,16 +834,17 @@ class VariationalReplayModule(L.LightningModule):
         self,
         case: EvaluationCaseBatch,
         *,
+        consumers: Sequence[EvaluationConsumer] = (),
         trace_request: EvaluationTraceRequest | None = None,
+        metric_observer: Callable[[ObservedStep], None] | None = None,
     ) -> EvaluationCaseResult:
-        """Execute one provider-owned replay case through the TEM eval path."""
+        """Execute one provider-owned replay case through the TEM evaluation path."""
         if trace_request is not None and trace_request.trace_meta is None:
             trace_request = EvaluationTraceRequest(
                 trace_spec=trace_request.trace_spec,
                 trace_meta=dict(self._bindings.build_trace_meta_fn(case.batch)),
             )
 
-        runtime = self._apply_runtime(self.global_step)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
         carry0 = eval_controller.initial_state(
@@ -854,6 +858,7 @@ class VariationalReplayModule(L.LightningModule):
             controller=eval_controller,
             carry=carry0,
             objective=eval_objective,
+            model=self.model,
             max_rollout_steps=(
                 self._execution.validation.max_rollout_steps
                 if self._execution is not None
@@ -866,16 +871,11 @@ class VariationalReplayModule(L.LightningModule):
             ),
             runner_options={"allow_halt": True, "explore": False},
             scoring_input_builder=self._build_scoring_input,
+            consumers=consumers,
             trace_request=trace_request,
+            metric_observer=metric_observer,
+            case_meta_fn=self._bindings.build_trace_meta_fn,
         )
-
-        if result.trace is not None and isinstance(
-            result.source_context, ArenaEvaluationSourceContext
-        ):
-            supplements = build_arena_trace_supplements(
-                result.source_context, result.trace.length
-            )
-            apply_arena_trace_supplements(result.trace, supplements)
 
         return result
 

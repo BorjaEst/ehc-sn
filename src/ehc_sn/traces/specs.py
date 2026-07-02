@@ -1,8 +1,8 @@
 """Trace field vocabulary and per-paradigm TraceSpec constructors.
 
-Mirrors :mod:`ehc_sn.metrics.signals` (scalar diagnostic names) and
-:mod:`ehc_sn.metrics.routes` (metric routing tables) for the temporal rollout
-data path.  All :class:`~ehc_sn.traces.TraceField` definitions live
+Mirrors :mod:`ehp_sn.metrics.signals` (scalar diagnostic names) and
+:mod:`ehp_sn.metrics.routes` (metric routing tables) for the temporal rollout
+data path.  All :class:`~ehp_sn.traces.TraceField` definitions live
 here so model files contain *no* trace wiring.
 
 Usage
@@ -25,81 +25,19 @@ Trace keys follow the same namespace hierarchy as diagnostic signals:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping, Protocol
+from typing import Any, Iterable, Literal, Mapping
 
 import torch
 from torch import Tensor
 
-from ehc_sn.traces.observer import TraceField, TraceSpec, TraceValue
-from ehc_sn.types import MemoryEntry
-
-
-# =============================================================================
-class _CommonTraceCarry(Protocol):
-    """Minimal carry surface shared across executed-step trace fields."""
-
-    halted: Tensor
-    steps: Tensor
-    data: Mapping[str, Any]
-
-
-class _CommonTraceContext(Protocol):
-    """Minimal execution context shared across all trace paradigms."""
-
-    index: int
-    carry: _CommonTraceCarry
-
-
-class _ACTTraceOutputs(Protocol):
-    """Raw ACT controller-step output surface accessed by ACT trace fields."""
-
-    q_logits: Tensor
-
-
-class _ACTTraceContext(_CommonTraceContext, Protocol):
-    """Execution context exposing raw ACT controller outputs."""
-
-    outputs: _ACTTraceOutputs
-
-
-class _RLTraceOutputs(Protocol):
-    """Output surface required by RL trace fields (matches InteractionRecord)."""
-
-    q_values: Tensor
-    state_value: Tensor
-    reward: Tensor
-    sampled_action: Tensor
-
-
-class _RLTraceContext(_CommonTraceContext, Protocol):
-    """Execution context exposing RL controller outputs."""
-
-    outputs: _RLTraceOutputs
-
-
-class _TEMTraceCarry(_CommonTraceCarry, Protocol):
-    """Carry surface required by TEM trace fields."""
-
-    static_data: Mapping[str, Any]
-    model_state: Any
-
-
-class _TEMTraceContext(_CommonTraceContext, Protocol):
-    """Execution context exposing TEM carry."""
-
-    carry: _TEMTraceCarry
-
-
-class _HRMTraceCarry(_CommonTraceCarry, Protocol):
-    """Carry surface required by HRM/PFC trace fields."""
-
-    model_state: Any
-
-
-class _HRMTraceContext(_CommonTraceContext, Protocol):
-    """Execution context for HRM/PFC trace fields."""
-
-    carry: _HRMTraceCarry
+from ehc_sn.contracts.dependencies import model_view
+from ehc_sn.traces.observer import (
+    StepContext,
+    TraceField,
+    TraceSpec,
+    TraceValue,
+)
+from ehc_sn.types import MemoryEntry, MultiScaleView, ScaleMetadata
 
 
 # =============================================================================
@@ -124,24 +62,24 @@ class ReplayableEnvironments:
 # =============================================================================
 
 
-def _get_halted(ctx: _CommonTraceContext) -> TraceValue:
-    return ctx.carry.halted.detach()
+def _get_halted(ctx: StepContext) -> TraceValue:
+    return ctx.record.snapshot.halted
 
 
-def _get_steps(ctx: _CommonTraceContext) -> TraceValue:
-    return ctx.carry.steps.detach()
+def _get_steps(ctx: StepContext) -> TraceValue:
+    return ctx.record.snapshot.steps
 
 
-def _get_input_ids_meta(ctx: _CommonTraceContext) -> TraceValue:
+def _get_input_ids_meta(ctx: StepContext) -> TraceValue:
     """Static token-id batch captured as metadata when figures request it."""
-    value = ctx.carry.data.get("input_ids")
-    return None if value is None else value.detach()
+    value = ctx.record.snapshot.data.get("input_ids")
+    return None if value is None else value
 
 
-def _get_labels_meta(ctx: _CommonTraceContext) -> TraceValue:
+def _get_labels_meta(ctx: StepContext) -> TraceValue:
     """Static label batch captured as metadata when figures request it."""
-    value = ctx.carry.data.get("labels")
-    return None if value is None else value.detach()
+    value = ctx.record.snapshot.data.get("labels")
+    return None if value is None else value
 
 
 TRACE_HALTED = TraceField(
@@ -176,10 +114,10 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 # =============================================================================
 
 
-def _get_action_logits_act(ctx: _ACTTraceContext) -> TraceValue:
+def _get_action_logits_act(ctx: StepContext) -> TraceValue:
     """Action logits over halt/continue from the raw ACT controller step."""
-    logits_q: Tensor = ctx.outputs.action_logits  # (B, n_actions)
-    return logits_q.detach()
+    logits_q: Tensor = ctx.record.outputs.action_logits  # (B, n_actions)
+    return logits_q
 
 
 TRACE_ACTION_LOGITS_ACT = TraceField(
@@ -195,108 +133,121 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_ACTION_LOGITS_ACT,)
 # =============================================================================
 
 
-def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
+def _get_q_logits_rl(ctx: StepContext) -> TraceValue:
     """Value-control Q-values over actions from the RL controller."""
-    return ctx.outputs.q_values.detach().cpu()
+    return ctx.record.outputs.q_values
 
 
-def _get_state_value_rl(ctx: _RLTraceContext) -> TraceValue:
+def _get_state_value_rl(ctx: StepContext) -> TraceValue:
     """Critic state-value estimates V(s) from the value head."""
-    return ctx.outputs.state_value.detach().cpu()
+    return ctx.record.outputs.state_value
 
 
-def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
+def _get_reward_env(ctx: StepContext) -> TraceValue:
     """Scalar environment reward for each batch slot."""
-    return ctx.outputs.reward.squeeze(-1).detach().cpu()
+    return ctx.record.outputs.reward.squeeze(-1)
 
 
-def _get_action(ctx: _RLTraceContext) -> TraceValue:
+def _get_action(ctx: StepContext) -> TraceValue:
     """Selected action index for each batch slot."""
-    return ctx.outputs.sampled_action.detach().cpu()
+    return ctx.record.outputs.sampled_action
 
 
-def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
+def _get_rpe(ctx: StepContext) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
-    reward: Tensor = ctx.outputs.reward.squeeze(-1)
-    value: Tensor = ctx.outputs.state_value.squeeze(-1)
-    return (reward - value).detach().cpu()
+    reward: Tensor = ctx.record.outputs.reward.squeeze(-1)
+    value: Tensor = ctx.record.outputs.state_value.squeeze(-1)
+    return reward - value
 
 
-def _get_world_observation_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_world_observation_tem(ctx: StepContext) -> TraceValue:
     """Current-step observation encoding aligned with this step's TEM outputs."""
-    v = ctx.carry.data.get("observation_id")
-    return None if v is None else v.detach().cpu()
+    v = ctx.record.snapshot.data.get("observation_id")
+    return None if v is None else v
 
 
-def _get_world_location_ids_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_world_location_ids_tem(ctx: StepContext) -> TraceValue:
     """Current-step location ids aligned with this step's TEM outputs."""
-    v = ctx.carry.data.get("location_id")
-    return None if v is None else v.squeeze(-1).detach().cpu()
+    v = ctx.record.snapshot.data.get("location_id")
+    return None if v is None else v.squeeze(-1)
 
 
-def _get_diagnostic_lec_cells_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_diagnostic_lec_cells_tem(ctx: StepContext) -> TraceValue:
     """Replayable LEC activations by frequency for diagnostic figures."""
-    return [cell.detach().cpu() for cell in ctx.carry.model_state.lec.cells]
+    return ctx.views.get("lec.cells")
 
 
-def _get_diagnostic_lec_filtered_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_diagnostic_lec_filtered_tem(ctx: StepContext) -> TraceValue:
     """Replayable LEC filtered by frequency for diagnostic figures."""
-    return [cell.detach().cpu() for cell in ctx.carry.model_state.lec.filtered]
+    return ctx.views.get("lec.filtered")
 
 
-def _get_diagnostic_lec_sensory_code_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_diagnostic_lec_sensory_code_tem(ctx: StepContext) -> TraceValue:
     """Replayable raw sensory code entering LEC inference by frequency."""
-    return [
-        cell.detach().cpu() for cell in ctx.carry.model_state.lec.sensory_code
-    ]
+    return ctx.views.get("lec.sensory_code")
 
 
-def _get_diagnostic_mec_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_diagnostic_mec_location_mean_tem(ctx: StepContext) -> TraceValue:
     """Replayable MEC location codes by frequency for diagnostic figures."""
-    return [cell.detach().cpu() for cell in ctx.carry.model_state.mec.cells]
+    return ctx.views.get("mec.cells")
 
 
-def _get_diagnostic_hpc_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_diagnostic_hpc_location_mean_tem(ctx: StepContext) -> TraceValue:
     """Replayable HPC grounded-location codes by frequency for diagnostic figures."""
-    return [cell.detach().cpu() for cell in ctx.carry.model_state.hpc.cells]
+    return ctx.views.get("hpc.cells")
 
 
-def _get_diagnostic_hpc_memory_tem(ctx: _TEMTraceContext) -> TraceValue:
-    """Replayable final-step-compatible HPC memory state for diagnostic figures."""
-    memory = ctx.carry.model_state.hpc.memory
+def _get_diagnostic_hpc_memory_summary_tem(ctx: StepContext) -> TraceValue:
+    """Replayable per-step HPC memory summary for diagnostic figures.
+
+    Returns lightweight scalars (active slots, write count, occupancy)
+    without materialising dense memory matrices.
+    """
+    return ctx.views.get("hpc.memory.summary")
+
+
+def _get_diagnostic_hpc_memory_final_tem(ctx: StepContext) -> TraceValue:
+    """Replayable final-step HPC memory state for diagnostic figures.
+
+    Only captured when ``hpc.memory.final`` is explicitly requested;
+    uses ``storage="meta"`` to avoid per-step dense matrix materialisation.
+    """
+    memory = ctx.views.get("hpc.memory.final")
+    if memory is None:
+        return None
     return {
-        "g_cued": _memory_entry_for_trace(memory.g_cued),
-        "x_cued": _memory_entry_for_trace(memory.x_cued),
+        "g_cued": memory["g_cued"],
+        "x_cued": memory["x_cued"],
     }
 
 
 def _memory_entry_for_trace(memory: MemoryEntry) -> Tensor:
     """Return the canonical dense memory operator for trace storage."""
-    return memory.to_dense().detach().cpu()
+    return memory.to_dense()
 
 
-def _get_lec_alpha_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_lec_alpha_sigmoid_tem(ctx: StepContext) -> TraceValue:
     """Static sigmoid-transformed LEC filter alpha values captured in carry data."""
-    value = ctx.carry.data.get("lec_alpha_sigmoid")
+    value = ctx.record.snapshot.data.get("lec_alpha_sigmoid")
     if value is None:
-        static_data = getattr(ctx.carry, "static_data", None)
+        static_data = getattr(ctx.record.snapshot, "static_data", None)
         value = (
             None
             if static_data is None
             else static_data.get("lec_alpha_sigmoid")
         )
-    return None if value is None else value.detach().cpu()
+    return None if value is None else value
 
 
-def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
+def _get_lec_w_f_sigmoid_tem(ctx: StepContext) -> TraceValue:
     """Static sigmoid-transformed LEC frequency weights captured in carry data."""
-    value = ctx.carry.data.get("lec_w_f_sigmoid")
+    value = ctx.record.snapshot.data.get("lec_w_f_sigmoid")
     if value is None:
-        static_data = getattr(ctx.carry, "static_data", None)
+        static_data = getattr(ctx.record.snapshot, "static_data", None)
         value = (
             None if static_data is None else static_data.get("lec_w_f_sigmoid")
         )
-    return None if value is None else value.detach().cpu()
+    return None if value is None else value
 
 
 TRACE_Q_LOGITS_RL = TraceField(
@@ -330,42 +281,46 @@ TRACE_WORLD_LOCATION_IDS_TEM = TraceField(
 TRACE_DIAGNOSTIC_LEC_CELLS_TEM = TraceField(
     name="diagnostic/lec/cells",
     get=_get_diagnostic_lec_cells_tem,
-    requires_model_state=True,
+    dependencies=frozenset({model_view("lec.cells")}),
 )
 TRACE_DIAGNOSTIC_LEC_FILTERED_TEM = TraceField(
     name="diagnostic/lec/filtered",
     get=_get_diagnostic_lec_filtered_tem,
-    requires_model_state=True,
+    dependencies=frozenset({model_view("lec.filtered")}),
 )
 TRACE_DIAGNOSTIC_LEC_SENSORY_CODE_TEM = TraceField(
     name="diagnostic/lec/sensory_code",
     get=_get_diagnostic_lec_sensory_code_tem,
-    requires_model_state=True,
+    dependencies=frozenset({model_view("lec.sensory_code")}),
 )
 TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM = TraceField(
     name="diagnostic/mec/location_mean",
     get=_get_diagnostic_mec_location_mean_tem,
-    requires_model_state=True,
+    dependencies=frozenset({model_view("mec.cells")}),
 )
 TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM = TraceField(
     name="diagnostic/hpc/location_mean",
     get=_get_diagnostic_hpc_location_mean_tem,
-    requires_model_state=True,
+    dependencies=frozenset({model_view("hpc.cells")}),
 )
-TRACE_DIAGNOSTIC_HPC_MEMORY_TEM = TraceField(
-    name="diagnostic/hpc/memory",
-    get=_get_diagnostic_hpc_memory_tem,
-    requires_model_state=True,
+TRACE_DIAGNOSTIC_HPC_MEMORY_SUMMARY_TEM = TraceField(
+    name="diagnostic/hpc/memory_summary",
+    get=_get_diagnostic_hpc_memory_summary_tem,
+    dependencies=frozenset({"hpc.memory.summary"}),
+)
+TRACE_DIAGNOSTIC_HPC_MEMORY_FINAL_TEM = TraceField(
+    name="diagnostic/hpc/memory_final",
+    get=_get_diagnostic_hpc_memory_final_tem,
+    dependencies=frozenset({"hpc.memory.final"}),
+    storage="meta",
 )
 TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM = TraceField(
     name="lec/filter/alpha_sigmoid",
     get=_get_lec_alpha_sigmoid_tem,
-    storage="meta",
 )
 TRACE_LEC_W_F_SIGMOID_TEM = TraceField(
     name="lec/w_f_sigmoid",
     get=_get_lec_w_f_sigmoid_tem,
-    storage="meta",
 )
 
 RL_TRACE_FIELDS: tuple[TraceField, ...] = (
@@ -382,66 +337,42 @@ RL_TRACE_FIELDS: tuple[TraceField, ...] = (
 # =============================================================================
 
 
-def _get_hrm_pfc_memory(ctx: _HRMTraceContext) -> Any | None:
-    """Return HRM/PFC working memory if present on the carry model state.
-
-    Returns ``None`` when model state is missing or the expected PFC
-    scratch memory path is not populated (e.g. a non-HRM model).
-    """
-    model_state = getattr(ctx.carry, "model_state", None)
-    if model_state is None:
-        return None
-    pfc_state = getattr(model_state, "pfc", None)
-    if pfc_state is None:
-        return None
-    scratch = getattr(pfc_state, "scratch", None)
-    if scratch is None:
-        return None
-    return getattr(scratch, "memory", None)
-
-
-def _get_hrm_z_H(ctx: _HRMTraceContext) -> TraceValue:
+def _get_hrm_z_H(ctx: StepContext) -> TraceValue:
     """High-level HRM/PFC working-memory state.
 
     Expected shape ``(B, S+1, D)`` where *S+1* includes the controller
-    slot.  Returns ``None`` when the memory path is unavailable.
+    slot.  Returns ``None`` when the view is unavailable.
     """
-    memory = _get_hrm_pfc_memory(ctx)
-    if memory is None:
-        return None
-    z_H = getattr(memory, "z_H", None)
+    z_H = ctx.views.get("pfc.z_H")
     if z_H is None:
         return None
-    return z_H.detach().cpu()
+    return z_H
 
 
-def _get_hrm_z_L(ctx: _HRMTraceContext) -> TraceValue:
+def _get_hrm_z_L(ctx: StepContext) -> TraceValue:
     """Low-level HRM/PFC working-memory state.
 
-    Expected shape ``(B, S+1, D)``.  Returns ``None`` when the memory
-    path is unavailable.
+    Expected shape ``(B, S+1, D)``.  Returns ``None`` when the view
+    is unavailable.
     """
-    memory = _get_hrm_pfc_memory(ctx)
-    if memory is None:
-        return None
-    z_L = getattr(memory, "z_L", None)
+    z_L = ctx.views.get("pfc.z_L")
     if z_L is None:
         return None
-    return z_L.detach().cpu()
+    return z_L
 
 
 TRACE_HRM_Z_H = TraceField(
     name="pfc/z_H",
     get=_get_hrm_z_H,
     storage="dense",
-    requires_model_state=True,
+    dependencies=frozenset({"pfc.z_H"}),
 )
 
 TRACE_HRM_Z_L = TraceField(
     name="pfc/z_L",
     get=_get_hrm_z_L,
     storage="dense",
-    requires_model_state=True,
+    dependencies=frozenset({"pfc.z_L"}),
 )
 
 HRM_HIDDEN_STATE_FIELDS: tuple[TraceField, ...] = (
@@ -469,24 +400,24 @@ HRM_REASONING_TRACE_FIELDS: tuple[TraceField, ...] = (
 # =============================================================================
 
 
-def _get_goaltrace_firing_field(ctx: _CommonTraceContext) -> TraceValue:
+def _get_goaltrace_firing_field(ctx: StepContext) -> TraceValue:
     """Predicted firing field from goaltrace task metadata."""
-    return ctx.carry.data.get("firing_field")
+    return ctx.record.snapshot.data.get("firing_field")
 
 
-def _get_goaltrace_target_field(ctx: _CommonTraceContext) -> TraceValue:
+def _get_goaltrace_target_field(ctx: StepContext) -> TraceValue:
     """Target firing field from goaltrace task metadata."""
-    return ctx.carry.data.get("target_field")
+    return ctx.record.snapshot.data.get("target_field")
 
 
-def _get_goaltrace_node_mask(ctx: _CommonTraceContext) -> TraceValue:
+def _get_goaltrace_node_mask(ctx: StepContext) -> TraceValue:
     """Node validity mask from goaltrace task metadata."""
-    return ctx.carry.data.get("node_mask")
+    return ctx.record.snapshot.data.get("node_mask")
 
 
-def _get_goaltrace_observation_id(ctx: _CommonTraceContext) -> TraceValue:
+def _get_goaltrace_observation_id(ctx: StepContext) -> TraceValue:
     """Observation IDs from goaltrace task metadata."""
-    return ctx.carry.data.get("observation_id")
+    return ctx.record.snapshot.data.get("observation_id")
 
 
 GOALTRACE_TRACE_FIRING_FIELD = TraceField(
@@ -533,7 +464,8 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_DIAGNOSTIC_LEC_SENSORY_CODE_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
-    TRACE_DIAGNOSTIC_HPC_MEMORY_TEM,
+    TRACE_DIAGNOSTIC_HPC_MEMORY_SUMMARY_TEM,
+    TRACE_DIAGNOSTIC_HPC_MEMORY_FINAL_TEM,
     TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM,
     TRACE_LEC_W_F_SIGMOID_TEM,
 )
@@ -558,11 +490,11 @@ def build_trace_spec(  # ------------------------------------------------------
     include_keys: Iterable[str] | None = None,
     extra_fields: Iterable[TraceField] | None = None,
 ) -> TraceSpec:
-    """Build a :class:`~ehc_sn.traces.TraceSpec` for a training paradigm.
+    """Build a :class:`~ehp_sn.traces.TraceSpec` for a training paradigm.
 
     Returns common fields plus paradigm-specific fields.  Pass the returned
-    spec to :class:`~ehc_sn.traces.TraceObserver` instead of
-    constructing :class:`~ehc_sn.traces.TraceField` lists in model files.
+    spec to :class:`~ehp_sn.traces.TraceObserver` instead of
+    constructing :class:`~ehp_sn.traces.TraceField` lists in model files.
 
     Args:
         paradigm: ``"act"`` for ACT-based models (hrm_v1) or
@@ -571,7 +503,7 @@ def build_trace_spec(  # ------------------------------------------------------
             ``"ehp"`` for EHP-based models (ehc_v1).
 
     Returns:
-        A :class:`~ehc_sn.traces.TraceSpec` instance.
+        A :class:`~ehp_sn.traces.TraceSpec` instance.
 
     Raises:
         ValueError: If *paradigm* is not ``"act"``, ``"rl"``, ``"tem"``, or ``"ehp"``.
@@ -636,73 +568,79 @@ class CaptureParadigmBinding:
     optional: tuple[str, ...] = ()
 
 
-# ── Profile: prediction_reasoning ────────────────────────────────────────────
-# Requires controller halt/step state plus decoded prediction and target.
-# Task-specific additions (e.g. solution_overlay for MazeHard) are injected
-# by experiment builders via include=.
+# ── Helper: compose two bindings ─────────────────────────────────────────────
 
-_PREDICTION_REASONING_BINDINGS: dict[str, CaptureParadigmBinding] = {
+
+def _compose_bindings(
+    base: CaptureParadigmBinding,
+    additions: CaptureParadigmBinding,
+) -> CaptureParadigmBinding:
+    """Return a new binding with *additions* appended to *base*."""
+    return CaptureParadigmBinding(
+        required=base.required + additions.required,
+        optional=base.optional + additions.optional,
+    )
+
+
+# ── Profile: prediction ──────────────────────────────────────────────────────
+# Task outputs plus compact controller execution fields.
+
+_PREDICTION_BINDINGS: dict[str, CaptureParadigmBinding] = {
     "act": CaptureParadigmBinding(
-        required=(
-            "act/halted",
-            "act/steps",
+        required=("act/halted", "act/steps"),
+        optional=(
+            "value/action_logits",
+            "input_ids",
+            "pred/prediction_overlay",
+            "goaltrace/firing_field",
+            "routebind/trajectory_field",
         ),
-        optional=("value/action_logits", "input_ids"),
     ),
     "rl": CaptureParadigmBinding(
-        required=(
-            "act/halted",
-            "act/steps",
-        ),
+        required=("act/halted", "act/steps"),
         optional=(
             "value/q_values",
             "value/state_value",
             "input_ids",
+            "pred/prediction_overlay",
+            "goaltrace/firing_field",
+            "routebind/trajectory_field",
         ),
     ),
     "tem": CaptureParadigmBinding(
         required=(
-            "act/halted",
-            "act/steps",
+            "pred/observation_id/post",
+            "pred/observation_id/recall",
+            "pred/observation_id/path",
         ),
         optional=(),
     ),
     "ehp": CaptureParadigmBinding(
         required=(
-            "act/halted",
-            "act/steps",
+            "pred/observation_id/post",
+            "pred/observation_id/recall",
+            "pred/observation_id/path",
         ),
         optional=(),
     ),
 }
 
-# ── Profile: full_diagnostic ─────────────────────────────────────────────────
-# All available controller, prediction, and diagnostic fields for a paradigm.
+# ── Profile: diagnostic ──────────────────────────────────────────────────────
+# Everything in ``prediction`` plus internal representations, memory state,
+# and supporting world-state fields.  Built by composition so the two profiles
+# cannot diverge.
 
-_FULL_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
+_DIAGNOSTIC_ADDITIONS: dict[str, CaptureParadigmBinding] = {
     "act": CaptureParadigmBinding(
-        required=(
-            "act/halted",
-            "act/steps",
-            "value/action_logits",
-        ),
-        optional=("pfc/z_H", "pfc/z_L"),
+        required=("pfc/z_H", "pfc/z_L"),
+        optional=(),
     ),
     "rl": CaptureParadigmBinding(
-        required=(
-            "act/halted",
-            "act/steps",
-            "value/q_values",
-            "value/state_value",
-        ),
-        optional=("pfc/z_H", "pfc/z_L"),
+        required=("pfc/z_H", "pfc/z_L"),
+        optional=(),
     ),
     "tem": CaptureParadigmBinding(
         required=(
-            "act/halted",
-            "act/steps",
-        ),
-        optional=(
             "world_step/observation",
             "world_step/location_ids",
             "diagnostic/lec/cells",
@@ -711,13 +649,10 @@ _FULL_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
             "diagnostic/hpc/location_mean",
             "diagnostic/hpc/memory",
         ),
+        optional=(),
     ),
     "ehp": CaptureParadigmBinding(
         required=(
-            "act/halted",
-            "act/steps",
-        ),
-        optional=(
             "world_step/observation",
             "world_step/location_ids",
             "diagnostic/lec/cells",
@@ -726,7 +661,15 @@ _FULL_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
             "diagnostic/hpc/location_mean",
             "diagnostic/hpc/memory",
         ),
+        optional=(),
     ),
+}
+
+_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
+    paradigm: _compose_bindings(
+        _PREDICTION_BINDINGS[paradigm], _DIAGNOSTIC_ADDITIONS[paradigm]
+    )
+    for paradigm in ("act", "rl", "tem", "ehp")
 }
 
 # ── Profile: metrics_only ────────────────────────────────────────────────────
@@ -743,20 +686,21 @@ TRACE_PROFILES: dict[str, CaptureProfileSpec] = {
     "metrics_only": CaptureProfileSpec(
         name="metrics_only",
         version=1,
-        description="No trace fields — only scalar metrics are collected.",
+        description="Scalar metrics and aggregate artifacts; no bounded trace capture.",
         paradigm_fields=_METRICS_ONLY_BINDINGS,
     ),
-    "prediction_reasoning": CaptureProfileSpec(
-        name="prediction_reasoning",
+    "prediction": CaptureProfileSpec(
+        name="prediction",
         version=1,
-        description="Controller halt/step state plus decoded prediction and target.",
-        paradigm_fields=_PREDICTION_REASONING_BINDINGS,
+        description="Task outputs plus compact controller execution fields.",
+        paradigm_fields=_PREDICTION_BINDINGS,
     ),
-    "full_diagnostic": CaptureProfileSpec(
-        name="full_diagnostic",
+    "diagnostic": CaptureProfileSpec(
+        name="diagnostic",
         version=1,
-        description="All available controller, prediction, and diagnostic fields.",
-        paradigm_fields=_FULL_DIAGNOSTIC_BINDINGS,
+        description="Prediction fields plus internal representations, memory state, "
+        "and supporting world-state fields.",
+        paradigm_fields=_DIAGNOSTIC_BINDINGS,
     ),
 }
 

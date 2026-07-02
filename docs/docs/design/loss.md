@@ -3,7 +3,32 @@ title: Loss and Objective Design
 description: Three-layer architecture of loss primitives, objectives, and metric contracts
 ---
 
-# Loss and Objective Design Contract
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
+# Loss Design Contract (`ehp_sn.loss`)
+
+> Pure differentiable mathematical functions with no domain knowledge.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Stateless loss primitives (`softmax_cross_entropy`, `mse_consistency`, `masked_mean`, etc.)                                  |
+| **Must not own**      | Objective composition; task semantics; model execution; metric accumulation; training orchestration                          |
+| **Public API**        | `masked_mean`, `masked_sum`, `softmax_cross_entropy`, `stablemax_cross_entropy`, `mse_consistency`, `gaussian_kl_divergence` |
+| **Allowed imports**   | `torch` (only)                                                                                                               |
+| **Forbidden imports** | Any `ehp_sn.*` package                                                                                                       |
+| **Layer**             | L1 — Domain Primitives                                                                                                       |
+| **API verified**      | ✅ Pure tensor functions; no domain imports                                                                                  |
+
+---
 
 > A three-layer architecture: mathematical primitives, task-level optimization
 > objectives, and detached evaluation metrics — each with a distinct lifecycle
@@ -106,7 +131,7 @@ metrics    diagnostics  training
 
 ---
 
-## 2. Layer 1 — Loss Primitives (`src/ehc_sn/losses/`)
+## 2. Layer 1 — Loss Primitives (`src/ehp_sn/losses/`)
 
 ### 2.1 Contract
 
@@ -292,7 +317,7 @@ def sum_gaussian_kl_divergence(
 
 ---
 
-## 3. Layer 2 — Objectives (`src/ehc_sn/objectives/`)
+## 3. Layer 2 — Objectives (`src/ehp_sn/objectives/`)
 
 ### 3.1 Shared result type
 
@@ -494,7 +519,7 @@ Signals never contribute to the gradient:
 
 ---
 
-## 4. Layer 3 — Metrics (`src/ehc_sn/metrics/`)
+## 4. Layer 3 — Metrics (`src/ehp_sn/metrics/`)
 
 ### 4.1 Separation from loss computation
 

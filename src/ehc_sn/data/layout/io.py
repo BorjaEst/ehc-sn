@@ -143,7 +143,7 @@ def write_layout_dataset(
         extent=extent or _derive_extent(layouts),
         n_samples=split_counts,
         source_id=layout_family,
-        builder="ehc_sn.data.layout.io.write_layout_dataset",
+        builder="ehp_sn.data.layout.io.write_layout_dataset",
         seed=topology_seed,
         stage_params={
             "topology_type": topology_type,

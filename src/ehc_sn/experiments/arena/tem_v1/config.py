@@ -14,17 +14,12 @@ Hierarchy (training):
     ├── trainer: TrainerConfig
     ├── checkpointing: CheckpointingConfig
     └── logging: LoggerSettings
-
-Hierarchy (evaluation):
-
-    ArenaTEMV1EvaluationExperimentConfig
-    └── model: ArenaTEMV1ModelConfig (same as above)
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -33,11 +28,9 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.variational_replay import (
@@ -126,36 +119,30 @@ class ArenaTEMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
     )
 
 
-class ArenaTEMV1EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for Arena × TEM-v1."""
+class ArenaTEMV1EvaluationOptions(EvaluationOptions):
+    """Pair-specific scientific evaluation options for Arena × TEM-v1.
 
-    model: ArenaTEMV1ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: Optional[TEMRuntimeConfig] = Field(
+    These are the only fields a user may set under ``[evaluation]`` in
+    the invocation TOML for the ``arena-tem-v1`` alias.  All recipe-owned
+    fields (controller, objective, adapter, provider, regime) are resolved
+    by the alias, not configurable here.
+    """
+
+    rollout_steps: int | None = Field(
         default=None,
-        description="Execution policy for eval-time runtime dynamics. "
-        "None skips runtime configuration (not valid for actual eval).",
+        ge=1,
+        description="Rollout horizon for evaluation.  None = recipe default.",
     )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
+    memory_reset: Literal["per-case", "per-episode"] = Field(
+        default="per-episode",
+        description="Memory reset policy between episodes.",
     )
 
 
 # =============================================================================
 __all__ = [
     "ArenaTEMV1ComponentConfigs",
+    "ArenaTEMV1EvaluationOptions",
     "ArenaTEMV1ModelConfig",
     "ArenaTEMV1TrainingExperimentConfig",
-    "ArenaTEMV1EvaluationExperimentConfig",
 ]

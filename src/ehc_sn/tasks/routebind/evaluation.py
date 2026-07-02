@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor
 
-from ehc_sn.eval.contracts import EvaluationCaseResult
+from ehc_sn.evaluation.contracts import EvaluationCaseResult
 from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
 from ehc_sn.tasks.routebind.decoding import (
     extract_route_from_trajectory_field,

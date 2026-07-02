@@ -13,7 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from ehc_sn.eval.artifacts import _SUCCESS_FILENAME, _write_dense_npz
+from ehc_sn.evaluation.artifacts import (
+    _SUCCESS_FILENAME,
+    _write_dense_npz,
+    build_evaluation_artifact_manifest,
+)
 from ehc_sn.traces.keys import (
     GOALTRACE_META_KEY_CURRENT_FLAG,
     GOALTRACE_META_KEY_GOAL_FLAG,
@@ -24,8 +28,6 @@ from ehc_sn.traces.keys import (
     GOALTRACE_META_KEY_TARGET_FIELD,
     GOALTRACE_META_KEY_WEIGHT,
 )
-
-_ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v3"
 
 # A representative goaltrace sample selected for diversity:
 # - multiple viable branches
@@ -139,31 +141,23 @@ def build_goaltrace_offline_artifact(output_dir: Path) -> Path:
         json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8"
     )
 
-    # Write manifest
-    manifest = {
-        "schema": _ARTIFACT_SCHEMA,
-        "status": "complete",
-        "task": "goaltrace",
-        "regime_id": "offline_overview",
-        "regime_kind": "diagnostic",
-        "phase_kind": "diag",
-        "trigger_kind": "manual",
-        "epoch": 0,
-        "step": 0,
-        "provenance": {
+    # Write manifest via shared constructor
+    manifest = build_evaluation_artifact_manifest(
+        task="goaltrace",
+        regime_id="offline_overview",
+        regime_kind="diagnostic",
+        phase_kind="diag",
+        trigger_kind="manual",
+        epoch=0,
+        step=0,
+        evaluation={
             "model_family": "none",
             "trace_paradigm": "none",
             "global_step": 0,
             "epoch": 0,
         },
-        "temporal_semantics": {
-            "rollout_mode": "none",
-            "carry_policy": "none",
-            "bptt_chunk_size": None,
-            "teacher_forcing": None,
-        },
-        "summary": {"n_cases": 1},
-        "cases": [
+        summary={"n_cases": 1},
+        cases=[
             {
                 "case_id": "goaltrace-overview-sample",
                 "source_context": None,
@@ -173,7 +167,7 @@ def build_goaltrace_offline_artifact(output_dir: Path) -> Path:
                 "meta_artifact": "cases/0000-sample.meta.json",
             }
         ],
-    }
+    )
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )

@@ -146,7 +146,7 @@ def compute_hrm_dynamics_metrics_from_trace(
     :func:`compute_hrm_dynamics_metrics`.
 
     Args:
-        trace: A :class:`~ehc_sn.traces.TraceTree` containing dense
+        trace: A :class:`~ehp_sn.traces.TraceTree` containing dense
             leaves ``pfc/z_H`` and ``pfc/z_L``.
 
     Returns:

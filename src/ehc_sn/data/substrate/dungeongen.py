@@ -11,7 +11,7 @@ build_shared_substrate.
 
 Shared-substrate channels (topology, observations, mask_valid, regions,
 landmarks) are task-neutral.  Trajectory and replay channels belong in task
-corpora; see ``ehc_sn.tasks.dungeon`` and ``ehc_sn.tasks.arena``.
+corpora; see ``ehp_sn.tasks.dungeon`` and ``ehp_sn.tasks.arena``.
 
 Interim layer: ``data/interim/dungeongen/`` — one NPZ file per split.
 Shared substrate: ``data/processed/dungeongen/v<version>/``
@@ -506,7 +506,7 @@ def build_shared_substrate(
             extent=[resolved_h, resolved_w],
             n_samples=split_counts,
             source_id=_SOURCE_ID,
-            builder="ehc_sn.data.substrate.dungeongen.build_shared_substrate",
+            builder="ehp_sn.data.substrate.dungeongen.build_shared_substrate",
             seed=seed,
             stage_params=stage_params,
         )

@@ -4,7 +4,7 @@ This module owns the conversion of MazeHard batch tensors into
 learning-ready supervision structs.  It is task-owned and reusable
 across model families (HRM v1, HRM v2, EHP).
 
-PATH upweighting logic moved here from :mod:`ehc_sn.adapters.hrm.objectives`.
+PATH upweighting logic moved here from :mod:`ehp_sn.adapters.hrm.objectives`.
 """
 
 from __future__ import annotations

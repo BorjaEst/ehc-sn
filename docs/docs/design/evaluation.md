@@ -5,10 +5,47 @@ description: Domain kernel for ehp-sn evaluation — protocol, request, result, 
 
 # Evaluation Design Contract (`ehp_sn.evaluation`)
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > A small domain kernel that owns the **meaning and orchestration** of
 > evaluation: specification, compatibility resolution, execution
-> orchestration, metric aggregation, result validation, and result
-> persistence.
+> orchestration, metric selection and coordination, result validation,
+> and result persistence.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owns**              | Evaluation specifications, protocols, suites; execution orchestration; metric selection/coordination; criteria; `EvaluationResult`; provenance |
+| **Must not own**      | Metric formulas/sufficient-statistics; trace capture; scientific analysis; figure rendering; report composition                                |
+| **Public API**        | `EvaluationRequest`, `EvaluationResult`, `EvaluationProtocol`, `EvaluationSuite`, `Criterion`, `evaluate`, `validate`                          |
+| **Allowed imports**   | `rollouts` (contracts only), `metrics`, `traces` (TraceReader, TraceSink), `contracts`, `types`                                                |
+| **Forbidden imports** | `analysis`, `figures` (core rendering), `lightning`, `training` (execution internals)                                                          |
+| **Layer**             | L5 — Observability & Evaluation                                                                                                                |
+| **API verified**      | 🔴 Known gap: doc uses `evaluation`; code is `eval/` with different type names                                                                 |
+
+### Transitional naming
+
+The canonical package name is `evaluation`. The current implementation
+uses `eval/` and `ehc_sn.eval` as temporary names during migration.
+
+| Canonical name (doc)   | Implementation name (code)         | Status            |
+| ---------------------- | ---------------------------------- | ----------------- |
+| `ehp_sn.evaluation`    | `ehc_sn.eval`                      | Migration pending |
+| `EvaluationRequest`    | (no equivalent yet)                | Target API        |
+| `EvaluationResult`     | `EvaluationRegimeResult` (partial) | Partial           |
+| `EvaluationProtocol`   | (embedded in recipes)              | Target API        |
+| `EvaluationSuite`      | `EvaluationRecipe` (partial)       | Partial           |
+| `EvaluationCaseResult` | `EvaluationCaseResult`             | Aligned           |
+
+---
 
 The evaluation subsystem answers these questions:
 
@@ -28,8 +65,9 @@ The evaluation subsystem answers these questions:
 ### Owns
 
 - Evaluation **specifications** (what is measured, under which protocol)
-- Evaluation **execution orchestration** (plan → run → aggregate)
-- Metric **computation and aggregation** (via delegated metrics)
+- Evaluation **execution orchestration** (plan → run → coordinate)
+- **Metric selection and coordination** (choosing metrics, feeding observations,
+  coordinating case/suite-level execution, placing values into results)
 - **Validation or acceptance rules** (criteria: pass/fail thresholds)
 - **Evaluation results** and artifact references (the typed `EvaluationResult`)
 - **Provenance** recording (protocol, model, dataset, environment)
@@ -38,11 +76,13 @@ The evaluation subsystem answers these questions:
 
 | Concern                                                                       | Owner                           |
 | ----------------------------------------------------------------------------- | ------------------------------- |
+| Metric formulas, sufficient statistics, accumulation algorithms               | `ehp_sn.metrics`                |
+| Denominator and masking semantics                                             | `ehp_sn.metrics`                |
+| Distributed sufficient-statistic reduction                                    | `ehp_sn.metrics`                |
 | Dataset construction, splits, batching                                        | `ehp_sn.data`                   |
 | Task semantics, targets, task-specific scoring                                | `ehp_sn.tasks`                  |
 | Model construction, architecture, inference contracts                         | `ehp_sn.models`, `experiments/` |
 | Recurrent execution mechanics, carry, environment stepping                    | `ehp_sn.rollouts`               |
-| Reusable metric algorithms (stateful `update`/`compute`/`reset`)              | `ehp_sn.metrics`                |
 | Trace collection infrastructure (observers, sinks, trace trees)               | `ehp_sn.traces`                 |
 | Post-hoc scientific computation (grid scores, place fields, pathway analysis) | `ehp_sn.analysis`               |
 | Visual rendering                                                              | `ehp_sn.figures`                |
@@ -899,7 +939,7 @@ result = evaluate(request)
 
 print(result.primary_metric)   # MetricResult(value=0.732, ...)
 print(result.passed)           # True / False
-print(result.output_directory) # Path("artifacts/eval/...")
+print(result.output_directory) # Path("artifacts/evaluation/...")
 
 result.require_passed()        # raises EvaluationCriterionFailed if not
 ```
@@ -1108,7 +1148,7 @@ worst issue severity.
 ## 12. Artifact bundle layout
 
 ```
-artifacts/eval/<suite>-<timestamp>/
+artifacts/evaluation/<suite>-<timestamp>/
 ├── _SUCCESS                          # atomic commit sentinel
 ├── evaluation.json                   # CANONICAL: versioned EvaluationResult
 │                                     #   schema_version, result (summary +
@@ -1267,7 +1307,7 @@ because it materially changes the interpretation of navigation metrics.
 
 ---
 
-## 15. Relationship to existing `ehc_sn.eval`
+## 15. Relationship to existing `ehp_sn.evaluation`
 
 The design **does not replace** the existing package wholesale. It evolves
 it by:

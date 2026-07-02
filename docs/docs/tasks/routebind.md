@@ -6,7 +6,7 @@
 | ------------- | ----------------------------------------------- |
 | Task name     | `routebind`                                     |
 | Benchmark     | goal-conditioned spatial route binding          |
-| Package path  | `src/ehc_sn/tasks/routebind/`                   |
+| Package path  | `src/ehp_sn/tasks/routebind/`                   |
 | CLI script    | `scripts/data-gen/build-routebind.py`           |
 | Output path   | `data/processed/routebind/<corpus>/v<version>/` |
 | Dataset class | `task_corpus`                                   |

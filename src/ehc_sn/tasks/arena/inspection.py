@@ -119,6 +119,47 @@ def prepare_sample_inspection(
     )
 
 
+# =============================================================================
+# Pathway metric prefixes — used by report-data derived resources
+# =============================================================================
+
+ARENA_TEM_PATHWAY_PREFIXES: dict[str, str] = {
+    "ancestral": "accuracy_path",
+    "retrieved": "accuracy_recall",
+    "inference": "accuracy_post",
+}
+"""Map from TEM prediction pathway name to metric name prefix."""
+
+
+def build_pathway_metrics_dataframe(
+    metrics: dict[str, float],
+) -> "pd.DataFrame":
+    """Build a per-pathway metrics table from an Arena TEM regime metrics dict.
+
+    Returns a DataFrame with columns ``pathway``, ``all_steps``,
+    ``revisit_steps``.
+
+    Args:
+        metrics: Flat ``{metric_name: value}`` dict from a regime artifact.
+
+    Returns:
+        DataFrame with one row per prediction pathway.
+    """
+    import pandas as pd
+
+    rows: list[dict[str, object]] = []
+    for path_name, prefix in ARENA_TEM_PATHWAY_PREFIXES.items():
+        row: dict[str, object] = {"pathway": path_name}
+        all_key = f"{prefix}_all"
+        revisit_key = f"{prefix}_revisit"
+        if all_key in metrics:
+            row["all_steps"] = metrics[all_key]
+        if revisit_key in metrics:
+            row["revisit_steps"] = metrics[revisit_key]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 __all__ = [
     "ArenaSampleInspection",
     "prepare_sample_inspection",

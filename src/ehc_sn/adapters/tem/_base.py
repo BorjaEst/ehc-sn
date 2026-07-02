@@ -204,7 +204,7 @@ class ArenaTwoHotEncoder(nn.Module):
     """Encodes arena step data into a multiscale sensory code.
 
     Materialises the one-hot observation from the raw ``observation_id`` integer,
-    applies a :class:`~ehc_sn.modules.autoencoder.TwoHotEncoder`, and replicates
+    applies a :class:`~ehp_sn.modules.autoencoder.TwoHotEncoder`, and replicates
     the code once per HPC frequency band.  The resulting list is passed to the
     model-native input constructor in the versioned encoder subclass.
     """

@@ -64,7 +64,9 @@ class BaseFigureTemplate(ABC):
     def plot(self) -> Figure:
         """Create, render, and return the final Matplotlib figure."""
         colorbar_groups: dict[str, dict[str, Any]] = {}
-        prp_layout = self.ctx.layout if self.ctx.layout is not None else self.PRP_LAYOUT
+        prp_layout = (
+            self.ctx.layout if self.ctx.layout is not None else self.PRP_LAYOUT
+        )
 
         with ExitStack() as stack:
             stack.enter_context(plt.style.context(list(self.ctx.styles)))
@@ -73,7 +75,9 @@ class BaseFigureTemplate(ABC):
             if self.ctx.dpi is not None:
                 context_kwargs["dpi"] = self.ctx.dpi
 
-            cm = prp.get_context(layout=prp_layout, **self.prp_options, **context_kwargs)
+            cm = prp.get_context(
+                layout=prp_layout, **self.prp_options, **context_kwargs
+            )
             fig, axs = stack.enter_context(cm)
             for ax in axs.ravel() if not isinstance(axs, Axes) else [axs]:
                 ax.remove()
@@ -93,7 +97,9 @@ class BaseFigureTemplate(ABC):
 
     def ax(self, name: str) -> Axes:
         if name not in self.axdict:
-            raise KeyError(f"Unknown slot '{name}'. Available slots: {sorted(self.axdict.keys())}")
+            raise KeyError(
+                f"Unknown slot '{name}'. Available slots: {sorted(self.axdict.keys())}"
+            )
         return self.axdict[name]
 
     def _render_panel(
@@ -113,20 +119,30 @@ class BaseFigureTemplate(ABC):
         tick_labelsize = meta.get("tick_labelsize", None)
         group_state = colorbar_groups.setdefault(
             group,
-            {"axes": [], "mappable": None, "label": label, "tick_labelsize": tick_labelsize},
+            {
+                "axes": [],
+                "mappable": None,
+                "label": label,
+                "tick_labelsize": tick_labelsize,
+            },
         )
         group_state["axes"].extend(axes)
 
         if group_state.get("label") is None and label is not None:
             group_state["label"] = label
-        if group_state.get("tick_labelsize") is None and tick_labelsize is not None:
+        if (
+            group_state.get("tick_labelsize") is None
+            and tick_labelsize is not None
+        ):
             group_state["tick_labelsize"] = tick_labelsize
 
         mappable = self._find_group_mappable(axes)
         if group_state["mappable"] is None and mappable is not None:
             group_state["mappable"] = mappable
 
-    def _apply_colorbars(self, colorbar_groups: dict[str, dict[str, Any]]) -> None:
+    def _apply_colorbars(
+        self, colorbar_groups: dict[str, dict[str, Any]]
+    ) -> None:
         for group_state in colorbar_groups.values():
             mappable = group_state.get("mappable")
             axes = group_state.get("axes", [])
@@ -151,7 +167,15 @@ class BaseFigureTemplate(ABC):
             if primary not in slots:
                 slots = (primary, *slots)
             order = meta.get("order")
-            panels.append(_PanelSpec(name=name, fn=attr, slots=slots, primary=primary, order=order))
+            panels.append(
+                _PanelSpec(
+                    name=name,
+                    fn=attr,
+                    slots=slots,
+                    primary=primary,
+                    order=order,
+                )
+            )
         return panels
 
     def _sorted_panels(self, panels: Iterable[_PanelSpec]) -> list[_PanelSpec]:
@@ -161,7 +185,9 @@ class BaseFigureTemplate(ABC):
 
         return sorted(panels, key=sort_key)
 
-    def _validate_slot_claims(self, panels: Iterable[_PanelSpec], available: set[str]) -> None:
+    def _validate_slot_claims(
+        self, panels: Iterable[_PanelSpec], available: set[str]
+    ) -> None:
         slot_to_panel: dict[str, str] = {}
         for p in panels:
             for slot in p.slots:
@@ -185,14 +211,18 @@ class BaseFigureTemplate(ABC):
             axes.append(self.axdict[slot])
         return axes
 
-    def _create_layout(self, fig: Figure, panels: Sequence[_PanelSpec]) -> dict[str, Axes]:
+    def _create_layout(
+        self, fig: Figure, panels: Sequence[_PanelSpec]
+    ) -> dict[str, Axes]:
         if self.MOSAIC is None:
             mosaic = self._default_mosaic_for_panels(panels)
         else:
             mosaic = self.MOSAIC
         return fig.subplot_mosaic(mosaic, **self.mosaic_options)
 
-    def _default_mosaic_for_panels(self, panels: Sequence[_PanelSpec]) -> list[list[str]]:
+    def _default_mosaic_for_panels(
+        self, panels: Sequence[_PanelSpec]
+    ) -> list[list[str]]:
         if not panels:
             raise ValueError("Figure template defines no panels and no MOSAIC.")
 
@@ -225,7 +255,9 @@ class BaseFigureTemplate(ABC):
             return ax.collections[-1]
         return None
 
-    def _find_group_mappable(self, axes: Sequence[Axes]) -> ScalarMappable | None:
+    def _find_group_mappable(
+        self, axes: Sequence[Axes]
+    ) -> ScalarMappable | None:
         for axis in axes:
             mappable = self._find_panel_mappable(axis)
             if mappable is not None:

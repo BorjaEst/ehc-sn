@@ -56,7 +56,7 @@ class StreamingRolloutResultWithTrace:
     """Streaming rollout evaluation with a materialized trace tree.
 
     The trace is produced by a :class:`TraceSink` and returned as a
-    finalized :class:`~ehc_sn.traces.trace_tree.TraceTree`.
+    finalized :class:`~ehp_sn.traces.trace_tree.TraceTree`.
     """
 
     execution: RolloutExecution
@@ -75,7 +75,6 @@ def run_captured_rollout(  # -------------------------------------------------
     max_rollout_steps: int | None = None,
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
-    snapshot_model_state: bool = False,
 ) -> RolloutChunk:
     """Execute a rollout and return the captured chunk."""
     executed = runner.run(
@@ -85,7 +84,6 @@ def run_captured_rollout(  # -------------------------------------------------
         max_rollout_steps=max_rollout_steps,
         hard_max_rollout_steps=hard_max_rollout_steps,
         options=dict(runner_options or {}),
-        snapshot_model_state=snapshot_model_state,
     )
     if not isinstance(executed, RolloutChunk):
         raise TypeError(
@@ -107,7 +105,6 @@ def score_captured_rollout(  # -----------------------------------------------
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
     scoring_input_builder: Callable[[StepRecord], object] | None = None,
-    snapshot_model_state: bool = False,
 ) -> CapturedRolloutResult:
     """Execute a rollout chunk and score it with a pure objective."""
     executed = run_captured_rollout(
@@ -118,7 +115,6 @@ def score_captured_rollout(  # -----------------------------------------------
         max_rollout_steps=max_rollout_steps,
         hard_max_rollout_steps=hard_max_rollout_steps,
         runner_options=runner_options,
-        snapshot_model_state=snapshot_model_state,
     )
     evaluated = score_rollout_chunk(
         executed, objective, scoring_input_builder=scoring_input_builder
@@ -140,7 +136,6 @@ def score_rollout_streaming(  # ----------------------------------------------
     scoring_input_builder: Callable[[StepRecord], object],
     observed_step_observer: Callable[[ObservedStep], None] | None = None,
     scored_record_observer: Callable[["ScoredRecord"], None] | None = None,
-    snapshot_model_state: bool = False,
 ) -> StreamingRolloutResult:
     """Execute a rollout and score records on the fly without storing the full chunk.
 
@@ -187,7 +182,6 @@ def score_rollout_streaming(  # ----------------------------------------------
         options=dict(runner_options or {}),
         record_observer=observe_record,
         capture_records=False,
-        snapshot_model_state=snapshot_model_state,
     )
     if isinstance(executed, RolloutChunk):
         raise TypeError(
@@ -217,7 +211,6 @@ def score_rollout_streaming_with_trace(  # ------------------------------------
     trace_sink: TraceSink | None = None,
     observed_step_observer: Callable[[ObservedStep], None] | None = None,
     scored_record_observer: Callable[["ScoredRecord"], None] | None = None,
-    snapshot_model_state: bool = False,
 ) -> StreamingRolloutResultWithTrace:
     """Execute a rollout, score records, and extract a trace in one streaming pass.
 
@@ -242,10 +235,6 @@ def score_rollout_streaming_with_trace(  # ------------------------------------
         ``None``, an ``InMemoryTraceSink`` is created automatically.
     observed_step_observer, scored_record_observer:
         Same as :func:`score_rollout_streaming`.
-    snapshot_model_state:
-        Whether to snapshot ``model_state`` in the runner's carry snapshot.
-        Automatically set to ``trace_spec.requires_model_state()`` when not
-        explicitly provided.
 
     Returns
     -------
@@ -256,9 +245,7 @@ def score_rollout_streaming_with_trace(  # ------------------------------------
     last_step: ObservedStep | None = None
     trace_observer = TraceObserver(trace_spec)
     if trace_sink is None:
-        trace_sink = InMemoryTraceSink(trace_spec)
-    if not snapshot_model_state:
-        snapshot_model_state = trace_spec.requires_model_state()
+        trace_sink = InMemoryTraceSink(trace_spec, max_steps=128)
 
     def observe_record(record: StepRecord) -> None:
         nonlocal total_loss, last_step
@@ -285,7 +272,6 @@ def score_rollout_streaming_with_trace(  # ------------------------------------
         options=dict(runner_options or {}),
         record_observer=observe_record,
         capture_records=False,
-        snapshot_model_state=snapshot_model_state,
     )
     if isinstance(executed, RolloutChunk):
         raise TypeError(

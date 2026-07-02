@@ -3,7 +3,7 @@
 This module owns the token-level accuracy computation and
 :class:`StepMetrics` construction used by supervised objectives
 (ACT, hybrid RL).  Loss primitives live in
-:mod:`ehc_sn.objectives.supervised.token`.
+:mod:`ehp_sn.objectives.supervised.token`.
 """
 
 from __future__ import annotations

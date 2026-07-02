@@ -1,7 +1,7 @@
 """Contract for metric scalar values — finite int/float, not bool.
 
 A **metric value** is any scalar that can appear in a summary dict,
-``MetricRecord.value``, or an eval-artifact manifest summary entry.
+``MetricRecord.value``, or an evaluation-artifact manifest summary entry.
 
 Valid values: ``int``, ``float`` (finite).
 Invalid: ``bool``, ``str``, ``None``, sequences, ``NaN``, ``inf``, ``-inf``.

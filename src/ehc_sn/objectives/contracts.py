@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from ehc_sn.metrics.token import AccuracyStats
 
 # TODO: Relocate RatioStat to a neutral contracts module
-# (e.g. src/ehc_sn/contracts/metrics.py) to avoid coupling
+# (e.g. src/ehp_sn/contracts/metrics.py) to avoid coupling
 # objective contracts to the full step-metrics transport layer.
 from ehc_sn.metrics.step_metrics import RatioStat  # noqa: TCH
 

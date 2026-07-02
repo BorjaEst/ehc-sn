@@ -1129,7 +1129,7 @@ def build_dagflow_layouts(
             extent=[n_max],
             n_samples=split_counts,
             source_id=_SOURCE_ID,
-            builder="ehc_sn.data.substrate.dagflow.build_dagflow_layouts",
+            builder="ehp_sn.data.substrate.dagflow.build_dagflow_layouts",
             seed=seed,
             stage_params=stage_params,
             preset=preset_name,

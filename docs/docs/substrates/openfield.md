@@ -9,7 +9,7 @@
 | Source         | synthetic (procedural generation)             |
 | Source ID      | `synthetic/openfield`                         |
 | CLI script     | `scripts/data-gen/build-openfield.py`         |
-| Builder module | `ehc_sn.data.layout.openfield`                |
+| Builder module | `ehp_sn.data.layout.openfield`                |
 | Output path    | `data/interim/openfield/<preset>/v<version>/` |
 | Dataset class  | `layout_dataset`                              |
 

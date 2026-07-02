@@ -6,7 +6,7 @@
 | ------------- | ---------------------------------------------- |
 | Task name     | `prospect`                                     |
 | Benchmark     | memory-conditioned spatial route binding       |
-| Package path  | `src/ehc_sn/tasks/prospect/`                   |
+| Package path  | `src/ehp_sn/tasks/prospect/`                   |
 | CLI script    | `scripts/data-gen/build-prospect.py`           |
 | Output path   | `data/processed/prospect/<corpus>/v<version>/` |
 | Dataset class | `task_corpus`                                  |

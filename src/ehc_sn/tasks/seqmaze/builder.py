@@ -548,7 +548,7 @@ def build_seqmaze_task_corpus(
             extent=[n_max],
             n_samples=split_counts,
             source_id="synthetic/dagflow",
-            builder="ehc_sn.tasks.seqmaze.builder.build_seqmaze_task_corpus",
+            builder="ehp_sn.tasks.seqmaze.builder.build_seqmaze_task_corpus",
             seed=seed,
             stage_params=stage_params,
             task=TASK_FAMILY,

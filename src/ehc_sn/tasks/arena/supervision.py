@@ -4,8 +4,8 @@ This module owns the conversion of Arena batch tensors into
 learning-ready supervision structs.  It is task-owned and reusable
 across model families (TEM, EHP).
 
-Delegates to existing coercion helpers in :mod:`ehc_sn.tasks.arena.runtime`
-and :mod:`ehc_sn.tasks.arena.evaluation`.
+Delegates to existing coercion helpers in :mod:`ehp_sn.tasks.arena.runtime`
+and :mod:`ehp_sn.tasks.arena.evaluation`.
 """
 
 from __future__ import annotations
@@ -57,9 +57,9 @@ class ArenaTEMSupervision:
 def build_arena_supervision(executed_batch: Batch) -> ArenaTEMSupervision:
     """Build Arena TEM supervision from an executed batch frame.
 
-    Delegates to :func:`~ehc_sn.tasks.arena.runtime.coerce_arena_targets`
-    and :func:`~ehc_sn.tasks.arena.evaluation.coerce_observation_ids` /
-    :func:`~ehc_sn.tasks.arena.evaluation.coerce_revisit_mask`.
+    Delegates to :func:`~ehp_sn.tasks.arena.runtime.coerce_arena_targets`
+    and :func:`~ehp_sn.tasks.arena.evaluation.coerce_observation_ids` /
+    :func:`~ehp_sn.tasks.arena.evaluation.coerce_revisit_mask`.
 
     Args:
         executed_batch: Must contain Arena replay step keys
@@ -106,7 +106,7 @@ def build_arena_tem_observation_metrics(
         targets: Arena supervision targets (``observation_id``, ``is_revisit``).
 
     Returns:
-        Dict mapping metric keys to :class:`~ehc_sn.metrics.step_metrics.RatioStat`
+        Dict mapping metric keys to :class:`~ehp_sn.metrics.step_metrics.RatioStat`
         values.
     """
     m_inf = build_arena_step_score(step_output.logits_post, targets)  # type: ignore[union-attr]

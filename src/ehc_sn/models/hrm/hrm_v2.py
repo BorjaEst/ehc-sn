@@ -223,6 +223,35 @@ class HRModelV2(nn.Module):
         """Compatibility wrapper over :meth:`step` for module-call users."""
         return self.step(payload, state=state)
 
+    def trace_views(  # -------------------------------------------------------
+        self,
+        requested: frozenset[str],
+        state: HRMStateV2 | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Extract semantic model observations for the current step.
+
+        Args:
+            requested: Set of semantic view names to extract.
+            state: Current model state.  When ``None``, views that require
+                state are silently omitted.
+
+        Returns:
+            Mapping of requested view name → detached tensor on the model
+            device.  Unknown or unavailable keys are silently skipped.
+        """
+        if not requested or state is None:
+            return {}
+
+        result: dict[str, torch.Tensor] = {}
+        scratch = state.pfc.scratch
+
+        if "pfc.z_H" in requested:
+            result["pfc.z_H"] = scratch.memory.z_H
+        if "pfc.z_L" in requested:
+            result["pfc.z_L"] = scratch.memory.z_L
+
+        return result
+
 
 # =============================================================================
 __all__ = [

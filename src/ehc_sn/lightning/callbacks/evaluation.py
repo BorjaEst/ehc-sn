@@ -4,13 +4,14 @@ This callback is orchestration-only:
 - resolves task-owned providers from provider_ref,
 - schedules named regimes on trainer cadence,
 - delegates execution through the family-owned execute_evaluation_batch seam
-  via ehc_sn.eval helpers,
+  via ehp_sn.evaluation helpers,
 - logs namespaced summary metrics,
 - persists returned trace/artifact payloads.
 
 Standard report generation is offline from persisted run directories via
-ehc_sn.reporting.figures. Callback-side figure rendering is optional
-diagnostic routing and is not the canonical report workflow.
+``ehp_sn.reporting`` loaders and ``ehp_sn.figures.render``. Callback-side
+figure rendering is optional diagnostic routing and is not the canonical
+report workflow.
 """
 
 from __future__ import annotations
@@ -22,22 +23,24 @@ from pathlib import Path
 from typing import Any, Literal
 
 import lightning.pytorch as pl
-import torch
 from lightning.pytorch import LightningModule, Trainer
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ehc_sn.eval import (
+from ehc_sn.evaluation import (
     EvaluationRegimeResult,
     EvaluationTraceRequest,
     iter_evaluation_regime,
 )
-from ehc_sn.eval.artifacts import (
+from ehc_sn.evaluation.artifacts import (
+    _extract_loss_scalar,
+    _validate_hook_metrics,
     persist_regime_artifact_bundle,
     resolve_provider,
 )
-from ehc_sn.eval.contracts import EvaluationCaseBatch
-from ehc_sn.eval.render import render_regime_preview_figures
+from ehc_sn.evaluation.contracts import EvaluationCaseBatch
+from ehc_sn.evaluation.render import render_regime_preview_figures
 from ehc_sn.figures import REGISTRY, FigureContext, list_figures
+from ehc_sn.figures.registry import FigureSurface
 from ehc_sn.metrics.values import validate_metric_value
 from ehc_sn.traces import build_trace_spec
 
@@ -157,7 +160,8 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
         non_diagnostic = [
             name
             for name in self.figures
-            if "diagnostic" not in REGISTRY.get(name).allowed_surfaces
+            if FigureSurface.INSPECTION
+            not in REGISTRY.get(name).allowed_surfaces
         ]
         if non_diagnostic:
             blocked = ", ".join(sorted(set(non_diagnostic)))
@@ -166,10 +170,12 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
                 f"online rendering: {blocked}."
             )
 
+        from ehc_sn.figures.registry import ArtifactInputs
+
         offline_only = [
             name
             for name in self.figures
-            if REGISTRY.get(name).input_contract == "offline_artifact"
+            if isinstance(REGISTRY.get(name).inputs, ArtifactInputs)
         ]
         if offline_only:
             blocked = ", ".join(sorted(set(offline_only)))
@@ -542,16 +548,30 @@ class EvaluationRegimesCallback(pl.Callback):
         artifact_keys: set[str] = set(trace_request.trace_keys)
         for name in trace_request.figure_names:
             figure = REGISTRY.get(name)
-            artifact_keys.update(figure.trace_keys)
-            artifact_keys.update(figure.meta_keys)
+            from ehc_sn.figures.registry import TaskDataInputs, TraceInputs
+
+            match figure.inputs:
+                case TraceInputs(trace_keys=tk, meta_keys=mk):
+                    artifact_keys.update(tk)
+                    artifact_keys.update(mk)
+                case TaskDataInputs(meta_keys=mk):
+                    artifact_keys.update(mk)
+                case _:
+                    pass
 
         # Keys needed for callback-local diagnostic preview rendering.
         preview_keys: set[str] = set()
         if figure_request.enabled:
             for name in figure_request.figures:
                 figure = REGISTRY.get(name)
-                preview_keys.update(figure.trace_keys)
-                preview_keys.update(figure.meta_keys)
+                match figure.inputs:
+                    case TraceInputs(trace_keys=tk, meta_keys=mk):
+                        preview_keys.update(tk)
+                        preview_keys.update(mk)
+                    case TaskDataInputs(meta_keys=mk):
+                        preview_keys.update(mk)
+                    case _:
+                        pass
 
         all_keys = artifact_keys | preview_keys
 
@@ -693,60 +713,6 @@ def _is_due(  # ---------------------------------------------------------------
 ) -> bool:
     """Return whether a schedule is due at the given optimizer step."""
     return schedule.every_n_steps > 0 and step % schedule.every_n_steps == 0
-
-
-# =============================================================================
-def _extract_loss_scalar(  # --------------------------------------------------
-    evaluated: Any,
-) -> float | None:
-    """Extract a scalar loss value from an evaluated chunk payload when available."""
-    loss = getattr(evaluated, "loss", None)
-    if loss is None:
-        return None
-    if torch.is_tensor(loss):
-        if loss.numel() != 1:
-            return None
-        return float(loss.detach().item())
-    if isinstance(loss, Real):
-        return float(loss)
-    return None
-
-
-# =============================================================================
-_RESERVED_SUMMARY_KEYS: frozenset[str] = frozenset({"n_cases", "loss"})
-
-
-def _validate_hook_metrics(  # ------------------------------------------------
-    task_summary: dict[str, object],
-) -> dict[str, float | int]:
-    """Validate and type-narrow a family-owned hook return value.
-
-    Rules:
-        - Keys in ``_RESERVED_SUMMARY_KEYS`` are rejected (``ValueError``).
-        - Per-value validation delegates to
-          :func:`ehc_sn.metrics.values.validate_metric_value`.
-
-    Returns
-    -------
-    dict[str, float | int]
-        Type-narrowed copy of the input with only valid scalar-numeric values.
-    """
-    collided = _RESERVED_SUMMARY_KEYS & task_summary.keys()
-    if collided:
-        raise ValueError(
-            "Hook returned reserved summary keys: " f"{sorted(collided)}."
-        )
-
-    validated: dict[str, float | int] = {}
-    for key, value in task_summary.items():
-        if not isinstance(key, str):
-            raise TypeError(
-                f"Metric key must be str, got {type(key).__name__} ({key!r})."
-            )
-        if not key:
-            raise ValueError("Metric key must be a non-empty string.")
-        validated[key] = validate_metric_value(key=key, value=value)
-    return validated
 
 
 # =============================================================================

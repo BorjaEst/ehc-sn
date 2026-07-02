@@ -45,7 +45,12 @@ from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
-from ehc_sn.types import MemoryState, MultiScaleCode
+from ehc_sn.types import (
+    MemoryState,
+    MultiScaleCode,
+    MultiScaleView,
+    ScaleMetadata,
+)
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -239,6 +244,59 @@ class TEMModelV2(nn.Module):
         """
         return replace(state, hpc=self.hpc.finalize_memory(state.hpc))
 
+    def trace_views(  # -------------------------------------------------------
+        self,
+        requested: frozenset[str],
+        state: TEMStateV2 | None = None,
+    ) -> dict[str, torch.Tensor | MultiScaleView]:
+        """Extract semantic model observations for the current step.
+
+        Args:
+            requested: Set of semantic view names to extract.
+            state: Current model state.  When ``None``, views that require
+                state are silently omitted.
+
+        Returns:
+            Mapping of requested view name → tensor or ``MultiScaleView`` on
+            the model device.  Multi-scale codes are returned as
+            ``MultiScaleView`` with named bands.  Unknown or unavailable keys
+            are silently skipped.
+        """
+        if not requested or state is None:
+            return {}
+
+        result: dict[str, torch.Tensor | MultiScaleView] = {}
+
+        if "lec.cells" in requested:
+            result["lec.cells"] = _multiscale_view(state.lec.cells)
+        if "lec.filtered" in requested:
+            result["lec.filtered"] = _multiscale_view(state.lec.filtered)
+        if "lec.sensory_code" in requested:
+            result["lec.sensory_code"] = _multiscale_view(
+                state.lec.sensory_code
+            )
+        if "mec.cells" in requested:
+            result["mec.cells"] = _multiscale_view(state.mec.cells)
+        if "hpc.cells" in requested:
+            result["hpc.cells"] = _multiscale_view(state.hpc.cells)
+        if "hpc.memory.summary" in requested:
+            memory = state.hpc.memory
+            result["hpc.memory.summary"] = {
+                "active_slots": memory.g_cued.to_dense().shape[-1],
+                "write_count": memory.g_cued.to_dense().shape[-1],
+                "occupancy_ratio": 1.0,
+            }
+        if "hpc.memory.write_event" in requested:
+            result["hpc.memory.write_event"] = None
+        if "hpc.memory.final" in requested:
+            memory = state.hpc.memory
+            result["hpc.memory.final"] = {
+                "g_cued": memory.g_cued.to_dense(),
+                "x_cued": memory.x_cued.to_dense(),
+            }
+
+        return result
+
     def _sensory_correction_error(  # -----------------------------------------
         self,
         sensory_features: MultiScaleCode,
@@ -372,6 +430,23 @@ class TEMModelV2(nn.Module):
             ),
             state,
         )
+
+
+# =============================================================================
+def _multiscale_view(
+    bands: list[Tensor],
+) -> MultiScaleView:
+    """Build a ``MultiScaleView`` from a positional list of per-frequency tensors."""
+    names = [f"freq_{i}" for i in range(len(bands))]
+    return MultiScaleView(
+        values={name: t for name, t in zip(names, bands)},
+        metadata={
+            name: ScaleMetadata(
+                band_name=name, feature_dim=t.shape[-1], index=i
+            )
+            for i, (name, t) in enumerate(zip(names, bands))
+        },
+    )
 
 
 # =============================================================================

@@ -18,12 +18,6 @@ Hierarchy (training):
     ├── trainer: TrainerConfig
     ├── checkpointing: CheckpointingConfig
     └── logging: LoggerSettings
-
-Hierarchy (evaluation):
-
-    MazeHardHRMV2EvaluationExperimentConfig
-    ├── model: MazeHardHRMV2ModelConfig (same as above)
-    └── execution: MazeHardDeliberationConfig (same as above)
 """
 
 from __future__ import annotations
@@ -38,11 +32,9 @@ from ehc_sn.controllers.deliberation.q_halting import (
     DeliberationQHaltingControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
+from ehc_sn.evaluation.invocation import EvaluationOptions
 from ehc_sn.experiments._infra import (
-    CaptureConfig,
     CheckpointingConfig,
-    ProviderConfig,
-    RegimeConfig,
     TrainerConfig,
 )
 from ehc_sn.lightning.modules.actor_critic import (
@@ -171,28 +163,13 @@ class MazeHardHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
     )
 
 
-class MazeHardHRMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    """Full evaluation application configuration for MazeHard × HRM-v2."""
+class MazeHardHRMV2EvaluationOptions(EvaluationOptions):
+    """Pair-specific evaluation options for MazeHard × HRM-v2."""
 
-    model: MazeHardHRMV2ModelConfig = Field(
-        ...,
-        description="Model structure (components only).",
-    )
-    execution: MazeHardDeliberationConfig = Field(
-        default_factory=MazeHardDeliberationConfig,
-        description="Execution / deliberation policy. Defaults are safe for evaluation.",
-    )
-    provider: ProviderConfig = Field(
-        ...,
-        description="Evaluation data provider specification.",
-    )
-    regime: RegimeConfig = Field(
-        ...,
-        description="Evaluation regime identity.",
-    )
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(),
-        description="Trace capture policy.",
+    max_deliberation_steps: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum ACT deliberation steps.  None = recipe default.",
     )
 
 
@@ -200,7 +177,7 @@ class MazeHardHRMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
 __all__ = [
     "MazeHardDeliberationConfig",
     "MazeHardHRMV2ComponentConfigs",
+    "MazeHardHRMV2EvaluationOptions",
     "MazeHardHRMV2ModelConfig",
     "MazeHardHRMV2TrainingExperimentConfig",
-    "MazeHardHRMV2EvaluationExperimentConfig",
 ]

@@ -1,7 +1,30 @@
 # Rollout Architecture
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: draft
+-->
+
 > Canonical design for `ehp_sn.rollouts` — the repository's **temporal
 > execution kernel**.
+
+---
+
+## Normative summary
+
+| Rule                  | Value                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owns**              | Temporal iteration; carry mechanism (init, propagation, reset, freeze, detach); `StepBoundary` aggregation; `StopReason`; `StepRecord`     |
+| **Must not own**      | Model architecture; control policies; loss construction; task semantics; backward calls; optimizer steps                                   |
+| **Public API**        | `RecurrentRunner`, `SingleStepRunner`, `StepController`, `StepRecord`, `StepBoundary`, `RolloutResult`, `StopReason`, `Source`, `StepSink` |
+| **Allowed imports**   | `contracts`, `types`, `controllers`, `adapters`                                                                                            |
+| **Forbidden imports** | `lightning`, `training`, `evaluation`, `models`, `objectives`, `traces`, `diagnostics`                                                     |
+| **Layer**             | L3 — Runtime Execution                                                                                                                     |
+| **API verified**      | ⚠️ Not verified against `__init__.py` exports                                                                                              |
+
+---
 
 `ehp_sn.rollouts` owns the execution of a controller against a source over
 time: maintaining recurrent carry, enforcing stopping and boundary semantics,
@@ -65,11 +88,36 @@ For EHP, a rollout may represent:
 | #   | Responsibility             | Concrete                                                                                      |
 | --- | -------------------------- | --------------------------------------------------------------------------------------------- |
 | 1   | **Temporal orchestration** | Which step runs next; which slots are active; when execution ends                             |
-| 2   | **Carry lifecycle**        | Initialisation, propagation, partial reset, freezing, detachment, final return                |
+| 2   | **Carry mechanism**        | Initialisation, propagation, partial reset, freezing, detachment implementation, final return |
 | 3   | **Boundary aggregation**   | Combine `valid`, `episode_start`, `halted`, `terminated`, `truncated` into one `StepBoundary` |
 | 4   | **Stop decisions**         | `StopReason` — why execution ended                                                            |
 | 5   | **Execution records**      | Per-step records, final carry, operation statistics                                           |
 | 6   | **Collection integration** | No collection, streaming, full capture, selected-output capture, composite sinks              |
+
+### 1.2a Carry / TBPTT division of ownership
+
+Training owns **when** a TBPTT truncation boundary occurs. Rollouts owns
+**how** a generic carry tree is transformed at that boundary. Models own
+model-specific boundary hooks (e.g., `finalize_memory()`).
+
+```
+training owns:   when a TBPTT truncation boundary occurs (TBPTTConfig)
+rollouts owns:   how a generic carry tree is transformed at that boundary
+models own:      model-specific boundary hooks (e.g. finalize_memory())
+```
+
+A suitable contract:
+
+```python
+next_carry = rollout_runtime.apply_boundary(
+    carry,
+    boundary=CarryBoundary(
+        reset_slots=...,
+        detach_autograd=training_policy.detach_here,
+        finalize_model_memory=...,
+    ),
+)
+```
 
 ### 1.3 What rollouts does NOT own
 
@@ -95,37 +143,37 @@ semantics. It does not own gradient context — the caller wraps execution in
 
 ### 1.4 Dependency position
 
-`ehp_sn.rollouts` sits in Layer 2 of the repository dependency DAG — it may
-import from `contracts/` and `types.py`, but must not import from
-`lightning/`, `training/`, `evaluation/`, `models/`, or `objectives/`.
+`ehp_sn.rollouts` sits in Layer 3 of the repository dependency DAG — it may
+import from `contracts/`, `types.py`, `controllers/`, and `adapters/`, but
+must not import from `lightning/`, `training/`, `evaluation/`, `models/`,
+or `objectives/`.
 
 ```mermaid
 flowchart TB
-    subgraph L1["Layer 1 — Contracts & Foundations"]
+    subgraph L0["Layer 0 — Foundations"]
         C["contracts/"]
+        U["utils/"]
         T["types.py"]
     end
 
-    subgraph L2["Layer 2 — Execution Kernels"]
-        RO["rollouts/"]
+    subgraph L2["Layer 2 — Computational Components"]
         CO["controllers/"]
-        O["objectives/"]
-        M["metrics/"]
+        AD["adapters/"]
+        MO["models/"]
+    end
+
+    subgraph L3["Layer 3 — Execution Kernels"]
+        RO["rollouts/"]
+        TRN["training/"]
         TR["traces/"]
     end
 
-    subgraph L3["Layer 3 — Training & Evaluation"]
-        L["lightning/"]
-        TRN["training/"]
+    subgraph L4["Layer 4 — Orchestration"]
         EV["evaluation/"]
     end
 
-    subgraph L4["Layer 4 — Specification"]
-        SC["scripts/"]
-    end
-
-    L2 --> L1
     L3 --> L2
+    L2 --> L0
     L4 --> L3
 
     style RO fill:#4a6,stroke:#2a4,color:#fff
@@ -141,7 +189,7 @@ Controllers implement `StepController`; they do not import rollout types.
 The `scoring.py` module inside `rollouts/` is a **non-core integration
 layer** that bridges between temporal execution and objective computation. It
 is optional — the rest of `rollouts/` functions completely without it. It may
-be relocated to `training/rollout_scoring.py` or `eval/rollout_scoring.py` if
+be relocated to `training/rollout_scoring.py` or `evaluation/rollout_scoring.py` if
 its dependency on objectives grows.
 
 ---
@@ -181,9 +229,14 @@ Structural protocols consumed by the execution kernel. Defined in
 class StepController(Protocol[SourceItemT, CarryT, ControllerOutputT]):
     """One logical control transition.
 
-    The runner calls ``step`` once per temporal step. The controller owns
-    model invocation, decision construction, and carry update for a single
-    transition.
+    The runner calls ``step`` once per temporal step. The controller
+    delegates model invocation to an adapter and owns the control
+    decision that follows.
+
+    Invocation chain:
+        runner → controller.step(...)
+            → adapter(model, task_input, state)
+            → controller decides (halt/continue/action) from bridge output
     """
 
     def step(
@@ -1004,7 +1057,7 @@ it. It bridges between temporal execution (`StepRecord`) and objective
 computation (`RolloutScorer`).
 
 If this module's dependency on objectives grows, it should be relocated to
-`training/rollout_scoring.py` or `eval/rollout_scoring.py`, where the
+`training/rollout_scoring.py` or `evaluation/rollout_scoring.py`, where the
 dependency direction is natural (training/evaluation depends on both
 rollouts and objectives).
 
@@ -1430,7 +1483,7 @@ proposed, mask=~active_before)` preserves inactive slots. There is no
 
 ## 16. Relationship to the existing codebase
 
-The current `ehc_sn.rollouts` is materially well-aligned with this design.
+The current `ehp_sn.rollouts` is materially well-aligned with this design.
 The refactoring is **extraction and normalisation**, not a rewrite.
 
 ### 16.1 What stays
@@ -1456,7 +1509,7 @@ The refactoring is **extraction and normalisation**, not a rewrite.
 | Code                             | Owner                | Reason                                                   |
 | -------------------------------- | -------------------- | -------------------------------------------------------- |
 | `training/rollout.py`            | `training/`          | Owns backward, optimiser steps, gradient accumulation    |
-| `eval/executor.py`               | `eval/`              | Owns evaluation orchestration, consumers, trace requests |
+| `evaluation/executor.py`         | `evaluation/`        | Owns evaluation orchestration, consumers, trace requests |
 | `CarryUpdater`, `CarryDetacher`  | `contracts/carry.py` | Cross-cutting — used by runners, sources, controllers    |
 | `StepFeedback`, `StepEvaluation` | `contracts/`         | Repository-wide task boundaries                          |
 | `RolloutScorer`                  | `objectives/`        | Owns loss definitions                                    |

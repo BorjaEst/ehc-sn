@@ -4,10 +4,10 @@
 Canonical owner of :class:`MazeHardStepEvaluatorConfig` and
 :class:`MazeHardStepEvaluator` that wire MazeHard task semantics into
 the deliberation actor-critic controller via
-:class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`.
+:class:`~ehp_sn.contracts.task_step.TaskStepEvaluator`.
 
 Task-owned reward semantics live in
-:mod:`ehc_sn.tasks.mazehard.reward` (:class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`).
+:mod:`ehp_sn.tasks.mazehard.reward` (:class:`~ehp_sn.tasks.mazehard.reward.MazeHardRewardProjector`).
 This evaluator delegates reward computation to the projector and keeps only
 terminated, truncated, reward emission, and runtime-state threading.
 """
@@ -50,14 +50,14 @@ class MazeHardStepEvaluatorConfig(BaseModel, extra="forbid"):
 
 # =============================================================================
 class MazeHardStepEvaluator(TaskStepEvaluator):
-    """MazeHard implementation of :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`.
+    """MazeHard implementation of :class:`~ehp_sn.contracts.task_step.TaskStepEvaluator`.
 
     Owned by the task layer; injected into
-    :class:`~ehc_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
+    :class:`~ehp_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
     at wiring time.
 
     Responsibilities:
-        - Delegate reward computation to :class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
+        - Delegate reward computation to :class:`~ehp_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
         - Mark per-slot termination when ``action == config.halt_action``.
         - Mark per-slot truncation when ``steps >= config.episode_horizon``.
         - No reward-local runtime state is threaded across steps.
@@ -73,7 +73,7 @@ class MazeHardStepEvaluator(TaskStepEvaluator):
         Args:
             config: Task-owned config specifying ``halt_action`` and ``episode_horizon``.
             reward_projector: Task-owned reward projector, injected at wiring time.
-                Lives in :mod:`ehc_sn.tasks.mazehard.reward`; the evaluator
+                Lives in :mod:`ehp_sn.tasks.mazehard.reward`; the evaluator
                 does not construct it internally.
         """
         self._halt_action = config.halt_action
@@ -92,14 +92,14 @@ class MazeHardStepEvaluator(TaskStepEvaluator):
 
         Args:
             data: Current per-slot batch dict with ``"labels"`` key (shape ``(B, S)``).
-            task_output: Must be a :class:`~ehc_sn.tasks.mazehard.contracts.MazeHardTaskOutput`
+            task_output: Must be a :class:`~ehp_sn.tasks.mazehard.contracts.MazeHardTaskOutput`
                 with a ``task_logits`` tensor of shape ``(B, S, V)``.
             action: Sampled action tensor of shape ``(B,)``.
             steps: Per-slot step counters of shape ``(B,)``.
             runtime_state: Unused runtime carry for MazeHard reward semantics.
 
         Returns:
-            :class:`~ehc_sn.contracts.task_step.StepEvaluation` with:
+            :class:`~ehp_sn.contracts.task_step.StepEvaluation` with:
                 - ``reward``: shape ``(B, 1)``, ``float32``.
                 - ``terminated``: ``action == halt_action``, shape ``(B,)``.
                 - ``truncated``: ``steps >= episode_horizon``, shape ``(B,)``.

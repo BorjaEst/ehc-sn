@@ -192,7 +192,7 @@ def build_mazehard_evaluation_sample(
 
 @dataclass
 class MazehardSolutionOverlayFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.
+    """Prepared data for :class:`~ehp_sn.figures.templates.
     mazehard_prediction_overlay.MazehardSolutionOverlayFigure`.
     """
 
@@ -203,7 +203,7 @@ class MazehardSolutionOverlayFigureData:
 
 @dataclass
 class MazehardPredictionEvolutionFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.
+    """Prepared data for :class:`~ehp_sn.figures.templates.
     prediction_reasoning_mazehard.MazehardPredictionEvolutionFigure`.
     """
 
@@ -271,7 +271,7 @@ def select_evolution(
 
 @dataclass
 class MazehardPredictionAccuracyFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.
+    """Prepared data for :class:`~ehp_sn.figures.templates.
     prediction_accuracy_over_steps.MazehardPredictionAccuracyFigure`.
     """
 
@@ -290,7 +290,7 @@ class MazehardPredictionAccuracyFigureData:
 
 @dataclass
 class MazehardTaskLayoutFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.
+    """Prepared data for :class:`~ehp_sn.figures.templates.
     task_overview_mazehard.MazehardTaskLayoutFigure`.
     """
 
@@ -453,7 +453,7 @@ def _select_timesteps(t_halt: int, k_max: int) -> list[int]:
     """Thin wrapper around :func:`select_reasoning_snapshots` for backward compat.
 
     The hybrid-sampling logic has moved to
-    ``ehc_sn.figures.selectors._reasoning_steps`` — this function delegates
+    ``ehp_sn.figures.selectors._reasoning_steps`` — this function delegates
     to the shared implementation.
     """
     from ehc_sn.figures.selectors._reasoning_steps import (

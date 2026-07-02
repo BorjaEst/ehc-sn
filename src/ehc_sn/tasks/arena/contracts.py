@@ -4,7 +4,7 @@ Arena is the structural-navigation task family: observation/action ontology,
 revisit semantics, and additive structural score for maze-world navigation.
 
 Contracts owns: semantic task input, output, targets, actions, and constants.
-Score report lives in :mod:`ehc_sn.tasks.arena.evaluation`.
+Score report lives in :mod:`ehp_sn.tasks.arena.evaluation`.
 
 Arena replay v1 is topology-free.  ``ArenaTaskInput`` carries only what the
 model needs: ids and step-semantic flags precomputed at build time.

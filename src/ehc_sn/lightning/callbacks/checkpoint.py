@@ -1,7 +1,5 @@
-from pathlib import Path
 from typing import Literal, Optional
 
-import torch
 from lightning.pytorch import callbacks as lp_callbacks
 from pydantic import BaseModel, Field, model_validator
 
@@ -75,58 +73,6 @@ class CheckpointCallback(lp_callbacks.ModelCheckpoint):
 
     def __init__(self, settings: CheckpointSettings):
         super().__init__(**settings.model_dump())
-
-    def _save_checkpoint(self, trainer, filepath: str) -> None:
-        """Save the normal checkpoint and a companion eval weights artifact."""
-        super()._save_checkpoint(trainer, filepath)
-        self._save_eval_weights_only_artifact(
-            filepath, trainer.lightning_module
-        )
-
-    @staticmethod
-    def _save_eval_weights_only_artifact(
-        filepath: str, lightning_module: object
-    ) -> None:
-        """Persist sibling eval-weights-only.pt from live module state."""
-        target_path = _resolve_eval_weights_artifact_path(filepath)
-        state_dict = _build_eval_weights_only_state_dict(lightning_module)
-        torch.save(state_dict, target_path)
-
-
-def _resolve_eval_weights_artifact_path(filepath: str) -> str:
-    """Return sibling eval artifact path for a saved checkpoint path."""
-    return str(Path(filepath).parent / "eval-weights-only.pt")
-
-
-def _build_eval_weights_only_state_dict(
-    lightning_module: object,
-) -> dict[str, object]:
-    """Build deduplicated weights-only state dict for eval collection.
-
-    EHP v1 registers the same backbone under both `model.*` and
-    `bridge_adapter.model.*`. For eval artifacts we keep canonical `model.*`
-    keys and drop duplicate alias-backed `bridge_adapter.model.*` entries.
-    """
-    if not hasattr(lightning_module, "state_dict"):
-        raise TypeError(
-            "CheckpointCallback requires lightning_module.state_dict() for "
-            "eval artifact export."
-        )
-    state_dict = lightning_module.state_dict()
-    if not isinstance(state_dict, dict):
-        raise TypeError("lightning_module.state_dict() must return a mapping.")
-
-    filtered: dict[str, object] = {}
-    for key, value in state_dict.items():
-        if key.startswith("bridge_adapter.model."):
-            canonical = "model." + key[len("bridge_adapter.model.") :]
-            if canonical in state_dict:
-                continue
-        if torch.is_tensor(value):
-            filtered[key] = value.detach().cpu()
-        else:
-            filtered[key] = value
-    return filtered
 
 
 # =============================================================================

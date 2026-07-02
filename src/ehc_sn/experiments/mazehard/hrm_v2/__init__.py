@@ -7,7 +7,6 @@ training experiment assembly, and evaluation executor construction.
 from .config import (
     MazeHardDeliberationConfig,
     MazeHardHRMV2ComponentConfigs,
-    MazeHardHRMV2EvaluationExperimentConfig,
     MazeHardHRMV2ModelConfig,
     MazeHardHRMV2TrainingExperimentConfig,
 )
@@ -20,7 +19,6 @@ __all__ = [
     "MazeHardHRMV2ComponentConfigs",
     "MazeHardHRMV2ModelConfig",
     "MazeHardHRMV2TrainingExperimentConfig",
-    "MazeHardHRMV2EvaluationExperimentConfig",
     "build_mazehard_hrm_v2_model",
     "build_mazehard_hrm_v2_training_experiment",
     "build_mazehard_hrm_v2_evaluation_experiment",

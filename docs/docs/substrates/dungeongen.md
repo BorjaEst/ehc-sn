@@ -9,7 +9,7 @@
 | Source         | dungeongen procedural library (local generation) |
 | Source ID      | `dungeongen`                                     |
 | CLI script     | `scripts/data-gen/build-dungeongen.py`           |
-| Builder module | `ehc_sn.data.substrate.dungeongen`               |
+| Builder module | `ehp_sn.data.substrate.dungeongen`               |
 | Output paths   | `data/interim/dungeongen/<preset>/v<version>/`   |
 | Dataset class  | `layout_dataset`                                 |
 
@@ -136,16 +136,16 @@ python build-routebind.py build --topology-root data/interim/dungeongen/routebin
 
 ## Build configuration
 
-| Parameter                       | Default | Description                                         |
-| ------------------------------- | ------- | --------------------------------------------------- |
-| `--version`                     | 1       | Substrate version integer.                          |
-| `--preset`                      | default | Named source preset (see ``--help`` for available). |
-| `--n-train`                     | 250     | Training samples.                                   |
-| `--n-val`                       | 10      | Validation samples.                                 |
-| `--n-test`                      | 10      | Test samples.                                       |
-| `--observation-vocabulary-size` | 45      | Distinct observation IDs to assign.                 |
-| `--topology-seed`               | 42      | Base seed for topology generation.                  |
-| `--n-sensory-instances`         | 1       | Sensory realizations per topology.                  |
+| Parameter                       | Default | Description                                       |
+| ------------------------------- | ------- | ------------------------------------------------- |
+| `--version`                     | 1       | Substrate version integer.                        |
+| `--preset`                      | default | Named source preset (see `--help` for available). |
+| `--n-train`                     | 250     | Training samples.                                 |
+| `--n-val`                       | 10      | Validation samples.                               |
+| `--n-test`                      | 10      | Test samples.                                     |
+| `--observation-vocabulary-size` | 45      | Distinct observation IDs to assign.               |
+| `--topology-seed`               | 42      | Base seed for topology generation.                |
+| `--n-sensory-instances`         | 1       | Sensory realizations per topology.                |
 
 Seeding: a single `--topology-seed` is expanded per layout via
 `numpy.random.SeedSequence`.

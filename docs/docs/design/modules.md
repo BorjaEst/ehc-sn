@@ -1,10 +1,17 @@
 # Module Design Contract
 
+<!--
+  canonical_package: ehp_sn
+  implementation_package: ehc_sn  (temporary, during migration)
+  authority: canonical
+  status: accepted
+-->
+
 > Reusable `torch.nn.Module` components and their local state/output contracts.
 
 `ehp_sn.modules` provides the **shared neural vocabulary** of the repository:
 parameterized, composable, independently testable components from which
-complete architectures are built. It does *not* contain complete model-family
+complete architectures are built. It does _not_ contain complete model-family
 subsystems, task orchestration, controller loops, objectives, training logic,
 or experiment configuration.
 
@@ -13,15 +20,19 @@ or experiment configuration.
 ## 1. Architectural position
 
 ```
-ehp_sn.contracts / types.py
+ehp_sn.contracts / ehp_sn.types
         ^
-ehp_sn.functional
+ehp_sn.utils / ehp_sn.functional
         ^
-ehp_sn.modules                    ← this package
+ehp_sn.modules                    ← this package (L2 — Computation)
         ^
-ehp_sn.models
+ehp_sn.models                    ← L2
         ^
-ehp_sn.controllers / objectives / training / evaluation
+ehp_sn.adapters / controllers / objectives  ← L2
+        ^
+ehp_sn.rollouts / training        ← L3
+        ^
+ehp_sn.evaluation                 ← L5
 ```
 
 ### 1.1 Dependencies
@@ -32,28 +43,30 @@ ehp_sn.controllers / objectives / training / evaluation
 - PyTorch (`torch`, `torch.nn`, `torch.nn.functional`);
 - `einops` for explicit tensor rearrangement;
 - `ehp_sn.contracts` or lightweight `ehp_sn.types`;
+- `ehp_sn.utils` (domain-neutral helpers only);
 - `ehp_sn.functional` (stateless tensor equations);
 - narrowly justified numerical utilities.
 
 It must **not** import `ehp_sn.models`, `ehp_sn.controllers`, `ehp_sn.objectives`,
 `ehp_sn.metrics`, `ehp_sn.lightning`, `ehp_sn.evaluation`, `ehp_sn.figures`,
+`ehp_sn.training`, `ehp_sn.rollouts`, `ehp_sn.traces`, `ehp_sn.diagnostics`,
 `ehp_sn.experiments`, or `ehp_sn.logging`.
 
 The repository currently respects this rule: `modules/` imports only from
-`ehc_sn.types`, `ehc_sn.utils`, and `ehc_sn.activations`.
+`ehp_sn.types`, `ehp_sn.utils`, and `ehp_sn.activations`.
 
 ### 1.2 Ownership
 
-| `modules` owns | `modules` does not own |
-|---|---|
-| Attention, MLP, transformer blocks | Complete TEM/HRM/EHP architectures |
-| Embeddings, projections | Subsystem orchestration (sensory-read -> transition cycle) |
-| Recurrent cells (one transition) | Grid-cell lifecycle (`generative` / `inference`) |
-| Memory read/write operators | PFC reasoning schedule (`step()` loop) |
-| Spatial primitives (path integration, filters, norms) | ACT deliberation, halting policy, step budgets |
-| Prediction heads (categorical, value, field) | Loss objectives, metric accumulation |
-| Workspace slot-addressing | Training loops, evaluation recipes |
-| Observation encoders/decoders | Experiment configuration |
+| `modules` owns                                        | `modules` does not own                                     |
+| ----------------------------------------------------- | ---------------------------------------------------------- |
+| Attention, MLP, transformer blocks                    | Complete TEM/HRM/EHP architectures                         |
+| Embeddings, projections                               | Subsystem orchestration (sensory-read -> transition cycle) |
+| Recurrent cells (one transition)                      | Grid-cell lifecycle (`generative` / `inference`)           |
+| Memory read/write operators                           | PFC reasoning schedule (`step()` loop)                     |
+| Spatial primitives (path integration, filters, norms) | ACT deliberation, halting policy, step budgets             |
+| Prediction heads (categorical, value, field)          | Loss objectives, metric accumulation                       |
+| Workspace slot-addressing                             | Training loops, evaluation recipes                         |
+| Observation encoders/decoders                         | Experiment configuration                                   |
 
 ---
 
@@ -77,7 +90,7 @@ Two questions decide placement:
 > **Q1.** Can this component be instantiated and tested without knowing which
 > model family, task, dataset, controller, or training recipe uses it?
 
-> **Q2.** Does the component execute *one* neural transformation, or does it
+> **Q2.** Does the component execute _one_ neural transformation, or does it
 > coordinate a sequence of transformations with lifecycle and phase semantics?
 
 **Q1 yes + Q2 "one transformation"** -> `modules`.
@@ -88,31 +101,31 @@ Two questions decide placement:
 The following table applies these questions to every component currently in
 the repository's `modules/` package.
 
-| Current location | Component | Classification | Recommendation |
-|---|---|---|---|
-| `modules/attention.py` | `Attention` | Reusable primitive | **Keep** |
-| `modules/mlp.py` | `SwiGLU`, `MLP` | Reusable primitive | **Keep** |
-| `modules/transformer.py` | `TransformerBlock`, `TransformerStack`, `TransformerSequenceSummary`, `TokenSummarizer` | Reusable primitive | **Keep** |
-| `modules/autoencoder.py` | `Autoencoder`, `TwoHotEncoder` | Reusable primitive | **Keep** |
-| `modules/projection.py` | `ProjectionModule`, `ProjectionBundle`, `ProjectionSettings` | Reusable primitive | **Keep** |
-| `modules/hpc/location.py` | `PlaceInference` | Reusable primitive | **Keep** (-> `modules/memory/`) |
-| `modules/hpc/query.py` | `AttractorRead`, `FactorRead` | Reusable primitive | **Keep** (-> `modules/memory/`) |
-| `modules/hpc/update.py` | `HebbianWrite`, `EpisodicWrite` | Reusable primitive | **Keep** (-> `modules/memory/`) |
-| `modules/hpc/_base.py` | `HPCBase` | Subsystem orchestration | **Move to** `models.tem` |
-| `modules/hpc/modules.py` | `HPCAttractor`, `HPCAttention` | Complete memory subsystems | **Move to** `models.tem` |
-| `modules/hpc/query_policy.py` | `ReadCues`, `CueRead`, `TargetRead` | TEM-specific query semantics | **Move to** `models.tem` |
-| `modules/mec/__init__.py` | `MECModel` | Subsystem orchestrator | **Move to** `models.tem` |
-| `modules/mec/path.py` | `PathIntegrator` | Reusable primitive | **Keep** (-> `modules/spatial/`) |
-| `modules/lec/__init__.py` | `LECModel` | Subsystem orchestrator | **Move to** `models.tem` |
-| `modules/lec/filter.py` | `FrequencyFilter` | Reusable primitive | **Keep** (-> `modules/spatial/`) |
-| `modules/lec/norm.py` | `FeatureNorm` | Reusable primitive | **Keep** (-> `modules/spatial/`) |
-| `modules/pfc/__init__.py` | `PFCModel` | Subsystem orchestrator | **Move to** `models.hrm` |
-| `modules/pfc/reasoning.py` | `HighLvRModule`, `LowLvRModule` | Recurrent cells | **Keep** (-> `modules/recurrent/`) |
-| `modules/pfc/values.py` | `QValueEstimator` | Reusable primitive | **Keep** (-> `modules/heads/`) |
-| `modules/pfc/workspace.py` | `Workspace`, `WorkspaceSchema`, `WorkspaceLayout` | Reusable primitive | **Keep** (-> `modules/workspace/`) |
-| `modules/str/__init__.py` | `STRModelLinear` | Actor-critic subsystem | **Move to** `models.hrm` |
-| `modules/str/__init__.py` | `compute_rpe()` | Pure function | **Move to** `ehp_sn.functional` |
-| `modules/bg/` | (empty stubs) | Pre-emptive placeholder | **Remove** |
+| Current location              | Component                                                                               | Classification               | Recommendation                     |
+| ----------------------------- | --------------------------------------------------------------------------------------- | ---------------------------- | ---------------------------------- |
+| `modules/attention.py`        | `Attention`                                                                             | Reusable primitive           | **Keep**                           |
+| `modules/mlp.py`              | `SwiGLU`, `MLP`                                                                         | Reusable primitive           | **Keep**                           |
+| `modules/transformer.py`      | `TransformerBlock`, `TransformerStack`, `TransformerSequenceSummary`, `TokenSummarizer` | Reusable primitive           | **Keep**                           |
+| `modules/autoencoder.py`      | `Autoencoder`, `TwoHotEncoder`                                                          | Reusable primitive           | **Keep**                           |
+| `modules/projection.py`       | `ProjectionModule`, `ProjectionBundle`, `ProjectionSettings`                            | Reusable primitive           | **Keep**                           |
+| `modules/hpc/location.py`     | `PlaceInference`                                                                        | Reusable primitive           | **Keep** (-> `modules/memory/`)    |
+| `modules/hpc/query.py`        | `AttractorRead`, `FactorRead`                                                           | Reusable primitive           | **Keep** (-> `modules/memory/`)    |
+| `modules/hpc/update.py`       | `HebbianWrite`, `EpisodicWrite`                                                         | Reusable primitive           | **Keep** (-> `modules/memory/`)    |
+| `modules/hpc/_base.py`        | `HPCBase`                                                                               | Subsystem orchestration      | **Move to** `models.tem`           |
+| `modules/hpc/modules.py`      | `HPCAttractor`, `HPCAttention`                                                          | Complete memory subsystems   | **Move to** `models.tem`           |
+| `modules/hpc/query_policy.py` | `ReadCues`, `CueRead`, `TargetRead`                                                     | TEM-specific query semantics | **Move to** `models.tem`           |
+| `modules/mec/__init__.py`     | `MECModel`                                                                              | Subsystem orchestrator       | **Move to** `models.tem`           |
+| `modules/mec/path.py`         | `PathIntegrator`                                                                        | Reusable primitive           | **Keep** (-> `modules/spatial/`)   |
+| `modules/lec/__init__.py`     | `LECModel`                                                                              | Subsystem orchestrator       | **Move to** `models.tem`           |
+| `modules/lec/filter.py`       | `FrequencyFilter`                                                                       | Reusable primitive           | **Keep** (-> `modules/spatial/`)   |
+| `modules/lec/norm.py`         | `FeatureNorm`                                                                           | Reusable primitive           | **Keep** (-> `modules/spatial/`)   |
+| `modules/pfc/__init__.py`     | `PFCModel`                                                                              | Subsystem orchestrator       | **Move to** `models.hrm`           |
+| `modules/pfc/reasoning.py`    | `HighLvRModule`, `LowLvRModule`                                                         | Recurrent cells              | **Keep** (-> `modules/recurrent/`) |
+| `modules/pfc/values.py`       | `QValueEstimator`                                                                       | Reusable primitive           | **Keep** (-> `modules/heads/`)     |
+| `modules/pfc/workspace.py`    | `Workspace`, `WorkspaceSchema`, `WorkspaceLayout`                                       | Reusable primitive           | **Keep** (-> `modules/workspace/`) |
+| `modules/str/__init__.py`     | `STRModelLinear`                                                                        | Actor-critic subsystem       | **Move to** `models.hrm`           |
+| `modules/str/__init__.py`     | `compute_rpe()`                                                                         | Pure function                | **Move to** `ehp_sn.functional`    |
+| `modules/bg/`                 | (empty stubs)                                                                           | Pre-emptive placeholder      | **Remove**                         |
 
 Components not listed (e.g. `MECLayout`, `P2GMemory`, `OVCCorrection`,
 `DenseHebbianStoreBackend`, `HebbianLayout`) are tightly coupled to TEM's
@@ -225,11 +238,11 @@ appropriate.
 
 ### 3.5 State ownership
 
-| Category | Ownership | Example |
-|---|---|---|
-| **Persistent learned** | `nn.Parameter` on the module | Embedding weights, projection matrices |
-| **Persistent non-learned** | `register_buffer()` | Fixed Fourier frequencies, static masks |
-| **Runtime episode state** | Explicit dataclass, passed in/out of `forward` | `MemoryState`, `TwoTimescaleState` |
+| Category                   | Ownership                                      | Example                                 |
+| -------------------------- | ---------------------------------------------- | --------------------------------------- |
+| **Persistent learned**     | `nn.Parameter` on the module                   | Embedding weights, projection matrices  |
+| **Persistent non-learned** | `register_buffer()`                            | Fixed Fourier frequencies, static masks |
+| **Runtime episode state**  | Explicit dataclass, passed in/out of `forward` | `MemoryState`, `TwoTimescaleState`      |
 
 Do **not** retain episode tensors on the module as attributes --- that obscures
 lifecycle, harms reentrancy, and can retain autograd graphs.
@@ -259,29 +272,29 @@ Public modules should define:
 
 The distinction is about **interface**, not parameterization:
 
-| | `ehp_sn.functional` | `ehp_sn.modules` |
-|---|---|---|
-| Interface | `def fn(tensor, ...) -> tensor` | `class Mod(nn.Module)` with `forward` |
-| Composition | Called directly in code | Plugged into `nn.Sequential`, `torch.compile`, model tree |
-| State | No persistent state by contract | May own `nn.Parameter`, `register_buffer`, or neither |
-| Use case | Atomic tensor equations, math utilities | Reusable architectural building blocks |
+|             | `ehp_sn.functional`                     | `ehp_sn.modules`                                          |
+| ----------- | --------------------------------------- | --------------------------------------------------------- |
+| Interface   | `def fn(tensor, ...) -> tensor`         | `class Mod(nn.Module)` with `forward`                     |
+| Composition | Called directly in code                 | Plugged into `nn.Sequential`, `torch.compile`, model tree |
+| State       | No persistent state by contract         | May own `nn.Parameter`, `register_buffer`, or neither     |
+| Use case    | Atomic tensor equations, math utilities | Reusable architectural building blocks                    |
 
 A module with **zero parameters** (e.g. `FeatureNorm`) is still correctly an
 `nn.Module` --- it is a composable building block that participates in device
 placement, serialization, and module-tree traversal.
 
-| Component | Correct home | Reason |
-|---|---|---|
-| `compute_rpe(r, V_s, V_s', gamma, done) -> Tensor` | `functional` | Direct tensor equation |
-| `hebbian_outer_product(p_inf, p_gen) -> Tensor` | `functional` | Direct tensor equation |
-| `cosine_read_weights(query, keys, mask, tau) -> Tensor` | `functional` | Direct tensor equation |
-| `masked_softmax(logits, mask) -> Tensor` | `functional` | Direct tensor equation |
-| `FeatureNorm(nn.Module)` | `modules.spatial` | Composable architectural building block |
-| `AttractorRead(nn.Module)` | `modules.memory` | Composable architectural building block |
-| `HebbianWrite(nn.Module)` | `modules.memory` | Composable architectural building block |
+| Component                                               | Correct home      | Reason                                  |
+| ------------------------------------------------------- | ----------------- | --------------------------------------- |
+| `compute_rpe(r, V_s, V_s', gamma, done) -> Tensor`      | `functional`      | Direct tensor equation                  |
+| `hebbian_outer_product(p_inf, p_gen) -> Tensor`         | `functional`      | Direct tensor equation                  |
+| `cosine_read_weights(query, keys, mask, tau) -> Tensor` | `functional`      | Direct tensor equation                  |
+| `masked_softmax(logits, mask) -> Tensor`                | `functional`      | Direct tensor equation                  |
+| `FeatureNorm(nn.Module)`                                | `modules.spatial` | Composable architectural building block |
+| `AttractorRead(nn.Module)`                              | `modules.memory`  | Composable architectural building block |
+| `HebbianWrite(nn.Module)`                               | `modules.memory`  | Composable architectural building block |
 
 The repository currently does not have an `ehp_sn.functional` package. Pure
-tensor equations live inline in module files or in `ehc_sn.utils`. Creating
+tensor equations live inline in module files or in `ehp_sn.utils`. Creating
 `functional/` is the recommended first migration step.
 
 ---
@@ -353,11 +366,11 @@ Use underscore-prefixed files for private implementation
 
 Use names that describe the **computation**:
 
-| Good | Weak |
-|---|---|
-| `AttractorRead` | `MemoryModule` |
-| `TwoTimescaleCell` | `NeuralModule` |
-| `FrequencyFilter` | `BaseComponent` |
+| Good               | Weak            |
+| ------------------ | --------------- |
+| `AttractorRead`    | `MemoryModule`  |
+| `TwoTimescaleCell` | `NeuralModule`  |
+| `FrequencyFilter`  | `BaseComponent` |
 
 Avoid the suffix `Module` --- `class AssociativeMemoryReader(nn.Module)` is
 preferable to `class AssociativeMemoryReaderModule(nn.Module)`.
@@ -452,19 +465,22 @@ warnings.warn(
 ## Appendix C: Testing standards
 
 ### Contract
+
 - Accepted shapes match documented spec
 - Returned shapes match documented spec
 - Dtype preservation under normal inputs
 - Invalid dimensions rejected with clear errors
 
 ### State and registration
+
 - `nn.Parameter`s appear in `named_parameters()`
 - Buffers appear in `named_buffers()`
 - `.to(device)` moves all persistent tensors
 - `state_dict()` round-trips correctly
-- `train()` / `eval()` propagates to children
+- `train()` / `evaluation()` propagates to children
 
 ### Numerical
+
 - Outputs are finite under normal inputs
 - Masked positions follow documented policy
 - All-invalid masks produce declared behaviour (not silent `NaN`)
@@ -472,6 +488,7 @@ warnings.warn(
 - Small known examples match hand calculations
 
 ### Integration
+
 - Usable under `torch.amp.autocast`
 - Deterministic under fixed seeds where expected
 - Compatible with model checkpoint loading
@@ -479,7 +496,7 @@ warnings.warn(
 
 ## Appendix D: Dependency audit (snapshot)
 
-`modules/` currently imports only from `ehc_sn.types`, `ehc_sn.utils`, and
-`ehc_sn.activations` --- no `models`, `controllers`, `training`, `evaluation`,
+`modules/` currently imports only from `ehp_sn.types`, `ehp_sn.utils`, and
+`ehp_sn.activations` --- no `models`, `controllers`, `training`, `evaluation`,
 or `logging` imports. The architectural issue is **ownership**, not import
 violation.
